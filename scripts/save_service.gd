@@ -8,6 +8,8 @@ static func defaults() -> Dictionary:
 		"version": 2,
 		"gene_shards": 0,
 		"owned_packs": ["base"],
+		"owned_gene_cards": [],
+		"perks": {},
 		"deck": GameData.BASE_CARD_IDS.duplicate(),
 		"tutorial_seen": false,
 		"last_difficulty": "normal",
@@ -36,6 +38,12 @@ static func normalize_data(parsed: Dictionary) -> Dictionary:
 	for key in fallback:
 		if not parsed.has(key):
 			parsed[key] = fallback[key]
+	if not parsed["owned_gene_cards"] is Array:
+		parsed["owned_gene_cards"] = []
+	if not parsed["perks"] is Dictionary:
+		parsed["perks"] = {}
+	for id in GameData.PERK_IDS:
+		parsed["perks"][id] = clampi(int(parsed["perks"].get(id, 0)), 0, 3)
 	if not parsed["best_wave"] is Dictionary:
 		parsed["best_wave"] = fallback["best_wave"]
 	else:
@@ -75,6 +83,9 @@ static func owned_card_ids(data: Dictionary) -> Array[String]:
 	if "advanced_network_pack" in data.get("owned_packs", []):
 		for id in GameData.ADVANCED_CARD_IDS:
 			result.append(id)
+	for id in GameData.GENE_CARD_IDS:
+		if id in data.get("owned_gene_cards", []):
+			result.append(id)
 	return result
 
 static func level_unlocked(data: Dictionary, level: int) -> bool:
@@ -110,3 +121,31 @@ static func record_wave(data: Dictionary, level: int, wave: int, endless: bool) 
 		return
 	var key := "endless_best" if endless else "campaign_best"
 	data[key][level - 1] = maxi(int(data[key][level - 1]), wave)
+
+static func perk_level(data: Dictionary, id: String) -> int:
+	if id not in GameData.PERK_IDS:
+		return 0
+	return clampi(int(data.get("perks", {}).get(id, 0)), 0, 3)
+
+static func gene_card_purchase(data: Dictionary, id: String) -> Dictionary:
+	if id not in GameData.GENE_CARD_IDS or id in data.get("owned_gene_cards", []):
+		return {}
+	if int(data.get("gene_shards", 0)) < GameData.GENE_CARD_COST:
+		return {}
+	var updated := data.duplicate(true)
+	updated["gene_shards"] = int(updated["gene_shards"]) - GameData.GENE_CARD_COST
+	updated["owned_gene_cards"].append(id)
+	return updated
+
+static func perk_purchase(data: Dictionary, id: String) -> Dictionary:
+	if id not in GameData.PERK_IDS:
+		return {}
+	var level := perk_level(data, id)
+	if level >= 3 or int(data.get("gene_shards", 0)) < int(GameData.PERK_COSTS[level]):
+		return {}
+	var updated := data.duplicate(true)
+	updated["gene_shards"] = int(updated["gene_shards"]) - int(GameData.PERK_COSTS[level])
+	if not updated.has("perks") or not updated["perks"] is Dictionary:
+		updated["perks"] = {}
+	updated["perks"][id] = level + 1
+	return updated

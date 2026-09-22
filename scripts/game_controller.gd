@@ -35,7 +35,7 @@ var _run_over := false
 var _exit_confirmation: Control
 var sound_manager: SoundManager
 
-func setup(p_difficulty: String, p_seed: int, p_deck: Array, show_tutorial: bool, p_level: int = 1, p_loadout: Array = []) -> void:
+func setup(p_difficulty: String, p_seed: int, p_deck: Array, show_tutorial: bool, p_level: int = 1, p_loadout: Array = [], perks: Dictionary = {}) -> void:
 	difficulty = p_difficulty
 	level = p_level
 	loadout.clear()
@@ -48,7 +48,7 @@ func setup(p_difficulty: String, p_seed: int, p_deck: Array, show_tutorial: bool
 		deck.append(str(card_id))
 	manifests = RunGenerator.generate_run(seed_value, level)
 	_build_ui()
-	board.configure(seed_value, difficulty, level)
+	board.configure(seed_value, difficulty, level, perks)
 	_update_wave_preview()
 	_update_build_policy()
 	if show_tutorial:

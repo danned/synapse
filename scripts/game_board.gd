@@ -21,6 +21,7 @@ var run_seed := 0
 var level := 1
 var wave_hp_scale := 1.0
 var wave_speed_scale := 1.0
+var permanent_perks: Dictionary = {}
 
 var selected_tower: StringName = &""
 var selected_node_id := -1
@@ -71,7 +72,7 @@ func _ready() -> void:
 	set_process(true)
 	queue_redraw()
 
-func configure(seed_value: int, difficulty_id: String, level_id: int = 1) -> void:
+func configure(seed_value: int, difficulty_id: String, level_id: int = 1, perks: Dictionary = {}) -> void:
 	run_seed = seed_value
 	difficulty = difficulty_id
 	level = level_id
@@ -79,13 +80,17 @@ func configure(seed_value: int, difficulty_id: String, level_id: int = 1) -> voi
 	top_path = layout["top_path"]
 	bottom_path = layout["bottom_path"]
 	blocked_cells = layout["blocked_cells"]
-	charge = GameData.STARTING_CHARGE
-	integrity = GameData.STARTING_INTEGRITY
+	permanent_perks = perks.duplicate(true)
+	charge = GameData.STARTING_CHARGE + 10 * _perk_level("reserve_cells")
+	integrity = GameData.STARTING_INTEGRITY + _perk_level("core_lattice")
 	graph = NetworkGraph.new()
 	rift_zones.clear()
 	charge_changed.emit(charge)
 	integrity_changed.emit(integrity)
 	queue_redraw()
+
+func _perk_level(id: String) -> int:
+	return clampi(int(permanent_perks.get(id, 0)), 0, 3)
 
 func set_selected_tower(type: StringName) -> void:
 	selected_tower = type
@@ -151,7 +156,7 @@ func sell_node(node_id: int) -> void:
 	var refund := 0
 	var towers := GameData.tower_definitions()
 	for id in subtree:
-		refund += int(round(float(towers[graph.nodes[id]["type"]]["cost"]) * 0.75))
+		refund += int(round(float(towers[graph.nodes[id]["type"]]["cost"]) * (0.75 + 0.03 * _perk_level("reclamation"))))
 	graph.remove_subtree(node_id)
 	charge += refund
 	selected_node_id = -1
@@ -181,7 +186,7 @@ func _process(delta: float) -> void:
 		wave_time += delta
 		pulse_timer -= delta
 		if pulse_timer <= 0.0:
-			pulse_timer += 1.2
+			pulse_timer += 1.2 * float(graph.modifiers["core_interval_mult"])
 			_emit_core_pulses()
 		_spawn_ready_enemies()
 		_update_enemies(delta)
@@ -285,7 +290,7 @@ func _spawn_pulse(from_id: int, to_id: int) -> void:
 
 func _update_pulses(delta: float) -> void:
 	var arrived: Array[int] = []
-	var pulse_speed := 5.0 * float(graph.modifiers["pulse_speed_mult"])
+	var pulse_speed := 5.0 * float(graph.modifiers["pulse_speed_mult"]) * (1.0 + 0.03 * _perk_level("signal_enzymes"))
 	for index in range(pulses.size()):
 		var pulse: Dictionary = pulses[index]
 		if _is_link_disabled(int(pulse["from"]), int(pulse["to"])):
@@ -355,7 +360,7 @@ func _on_pulse_arrived(node_id: int) -> void:
 		_spawn_pulse(node_id, child_id)
 
 func _fire_arc(node_id: int) -> void:
-	var targets := _targets_in_range(_node_position(node_id), 2.5 + float(graph.modifiers["tower_range_bonus"]), 3)
+	var targets := _targets_in_range(_node_position(node_id), 2.5 + float(graph.modifiers["tower_range_bonus"]), 3 + int(graph.modifiers["arc_targets_bonus"]))
 	var target_ids: Array[int] = []
 	for index in targets:
 		target_ids.append(int(enemies[index]["id"]))
@@ -377,6 +382,14 @@ func _fire_cryo(node_id: int) -> void:
 	enemy["slow_until"] = world_time + 1.5
 	enemy["slow_factor"] = 0.58
 	enemies[index] = enemy
+	if bool(graph.modifiers["cryo_bloom"]):
+		var center: Vector2 = enemy["position"]
+		for other_index in range(enemies.size()):
+			if other_index == index or Vector2(enemies[other_index]["position"]).distance_to(center) > CELL_SIZE * 0.75:
+				continue
+			var other: Dictionary = enemies[other_index]
+			other["root_until"] = maxf(float(other["root_until"]), world_time + 0.25)
+			enemies[other_index] = other
 	_damage_enemy(index, 6.0, false)
 	effects.append({"type": "burst", "position": enemy["position"], "ttl": 0.35, "color": Color("9c82ff")})
 	sfx_requested.emit(&"cryo")
@@ -394,7 +407,7 @@ func _fire_lance(node_id: int) -> void:
 
 func _fire_lance_segment(start: Vector2, finish: Vector2) -> void:
 	for index in range(enemies.size() - 1, -1, -1):
-		if _distance_to_segment(enemies[index]["position"], start, finish) <= CELL_SIZE * 0.28:
+		if _distance_to_segment(enemies[index]["position"], start, finish) <= CELL_SIZE * (0.28 + float(graph.modifiers["lance_width_bonus"])):
 			var amount := 24.0
 			if world_time < float(enemies[index]["marked_until"]): amount *= 1.5
 			_damage_enemy(index, amount, false)
@@ -448,6 +461,8 @@ func _damage_enemy(index: int, raw_amount: float, from_link: bool) -> void:
 		amount *= 0.55
 	if enemy["type"] == &"phase" and from_link:
 		amount *= 0.5
+	if from_link and bool(graph.modifiers["conductive_mark"]) and world_time < float(enemy["marked_until"]):
+		amount *= 1.25
 	enemy["hp"] = float(enemy["hp"]) - amount
 	if float(enemy["hp"]) <= 0.0:
 		var definition: Dictionary = GameData.enemy_definitions()[enemy["type"]]
@@ -471,7 +486,7 @@ func _try_disable_link(enemy: Dictionary) -> void:
 		var start := _node_position(parent_id)
 		var finish := _node_position(child_id)
 		if _distance_to_segment(enemy["position"], start, finish) <= CELL_SIZE * 0.25:
-			var duration := 4.0 if enemy["type"] == &"severer" else 2.5
+			var duration := (4.0 if enemy["type"] == &"severer" else 2.5) * float(graph.modifiers["disable_duration_mult"])
 			disabled_links[_edge_key(parent_id, child_id)] = world_time + duration
 			enemy["disable_cooldown"] = world_time + (3.5 if enemy["type"] == &"severer" else 999.0)
 			effects.append({"type": "burst", "position": enemy["position"], "ttl": 0.45, "color": Color("68ff9b")})
@@ -508,7 +523,7 @@ func _check_wave_complete(delta: float) -> void:
 	if _finish_delay <= 0.0:
 		wave_active = false
 		pulses.clear()
-		charge += 35 + current_wave * 5
+		charge += 35 + current_wave * 5 + 3 * _perk_level("wave_metabolism")
 		charge_changed.emit(charge)
 		wave_finished.emit()
 		sfx_requested.emit(&"wave_complete")

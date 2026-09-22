@@ -12,6 +12,10 @@ func _run_tests() -> void:
 	_test_graph_validation()
 	_test_round_robin_routing()
 	_test_modifiers()
+	_test_gene_cards()
+	_test_gene_purchases()
+	_test_permanent_perks()
+	_test_gene_lab_ui()
 	_test_wave_determinism()
 	_test_wave_fuzzing()
 	_test_level_layouts()
@@ -39,8 +43,10 @@ func _expect(condition: bool, message: String) -> void:
 func _test_content_catalog() -> void:
 	_expect(GameData.tower_definitions().size() == 6, "Tower catalog must contain six nodes")
 	_expect(GameData.enemy_definitions().size() == 8, "Enemy catalog must contain seven units and the boss")
-	_expect(GameData.card_definitions().size() == 12, "Card catalog must contain eight base and four advanced cards")
+	_expect(GameData.card_definitions().size() == 20, "Card catalog must contain eight base, four advanced and eight gene cards")
 	_expect(GameData.BASE_CARD_IDS.size() == 8, "Starting deck must contain eight cards")
+	for id in GameData.GENE_CARD_IDS:
+		_expect(GameData.card_definitions().has(id) and not GameData.card_modifier(id).is_empty(), "Gene card must have a definition and effect: %s" % id)
 
 func _test_graph_validation() -> void:
 	var graph := NetworkGraph.new()
@@ -84,6 +90,92 @@ func _test_modifiers() -> void:
 	_expect(is_equal_approx(float(graph.modifiers["pulse_speed_mult"]), 1.04), "Multiplicative pulse modifiers must compose")
 	graph.apply_modifier("parallel_roots")
 	_expect(graph.child_capacity(0) == 3, "Parallel Roots must add a Core port")
+
+func _test_gene_cards() -> void:
+	var graph := NetworkGraph.new()
+	var relay := graph.place_node(&"relay", Vector2i(13, 3), 0)
+	var a := graph.place_node(&"arc", Vector2i(11, 1), relay)
+	var b := graph.place_node(&"cryo", Vector2i(10, 3), relay)
+	var c := graph.place_node(&"lance", Vector2i(11, 5), relay)
+	graph.apply_modifier("twin_gate")
+	_expect(graph.outgoing_for_pulse(relay) == [a], "Twin Gate first pulse uses one branch")
+	_expect(graph.outgoing_for_pulse(relay) == [b], "Twin Gate second pulse uses one branch")
+	_expect(graph.outgoing_for_pulse(relay) == [c, a], "Twin Gate third pulse uses successive branches")
+	_expect(graph.outgoing_for_pulse(relay) == [b], "Twin Gate advances past both fed branches")
+	graph.apply_modifier("synchronized_split")
+	graph.reset_routing()
+	for i in range(3):
+		graph.outgoing_for_pulse(relay)
+	_expect(graph.outgoing_for_pulse(relay).size() == 3, "Synchronized Split takes precedence over Twin Gate")
+	graph.apply_modifier("weapon_junction")
+	_expect(graph.child_capacity(a) == 2 and graph.child_capacity(b) == 2 and graph.child_capacity(c) == 2, "Weapon Junction adds weapon ports")
+	var board := GameBoard.new()
+	board.graph.apply_modifier("core_metronome")
+	board.graph.apply_modifier("arc_cascade")
+	board.graph.apply_modifier("lance_fan")
+	board.graph.apply_modifier("recovery_sheath")
+	board.graph.apply_modifier("conductive_mark")
+	_expect(is_equal_approx(float(board.graph.modifiers["core_interval_mult"]), 0.9), "Core Metronome changes launch interval")
+	_expect(int(board.graph.modifiers["arc_targets_bonus"]) == 1, "Arc Cascade adds a target")
+	_expect(is_equal_approx(float(board.graph.modifiers["lance_width_bonus"]), 0.12), "Lance Fan widens beams")
+	_expect(is_equal_approx(float(board.graph.modifiers["disable_duration_mult"]), 0.65), "Recovery Sheath shortens disable time")
+	board._spawn_enemy(&"crawler", 0)
+	board.enemies[0]["marked_until"] = 3.0
+	board._damage_enemy(0, 12.0, true)
+	_expect(is_equal_approx(float(board.enemies[0]["hp"]), 19.0), "Conductive Mark increases link damage")
+	board.free()
+	var cryo_board := GameBoard.new()
+	var cryo := cryo_board.graph.place_node(&"cryo", Vector2i(13, 3), 0)
+	cryo_board.graph.apply_modifier("cryo_bloom")
+	cryo_board._spawn_enemy(&"crawler", 0)
+	cryo_board._spawn_enemy(&"crawler", 0)
+	cryo_board.enemies[0]["position"] = cryo_board._node_position(cryo)
+	cryo_board.enemies[1]["position"] = cryo_board._node_position(cryo) + Vector2(20, 0)
+	cryo_board._fire_cryo(cryo)
+	_expect(float(cryo_board.enemies[1]["root_until"]) >= 0.25, "Cryo Bloom roots a nearby second enemy")
+	cryo_board.free()
+
+func _test_gene_purchases() -> void:
+	var data := SaveService.defaults()
+	data["gene_shards"] = 30
+	var purchased := SaveService.gene_card_purchase(data, "weapon_junction")
+	_expect(int(purchased["gene_shards"]) == 24 and "weapon_junction" in purchased["owned_gene_cards"], "Card purchase spends shards and grants ownership")
+	_expect(int(data["gene_shards"]) == 30 and data["owned_gene_cards"].is_empty(), "Purchase leaves original save unchanged")
+	_expect("weapon_junction" in SaveService.owned_card_ids(purchased), "Purchased card becomes deck eligible")
+	_expect(SaveService.gene_card_purchase(purchased, "weapon_junction").is_empty(), "Duplicate card purchase is rejected")
+	_expect(SaveService.gene_card_purchase(data, "unknown").is_empty(), "Unknown card purchase is rejected")
+	data["gene_shards"] = 5
+	_expect(SaveService.gene_card_purchase(data, "arc_cascade").is_empty(), "Card purchase needs enough shards")
+
+func _test_permanent_perks() -> void:
+	var data := SaveService.defaults()
+	data["gene_shards"] = 30
+	for level in range(3):
+		data = SaveService.perk_purchase(data, "reserve_cells")
+		_expect(SaveService.perk_level(data, "reserve_cells") == level + 1, "Perk level advances")
+	_expect(int(data["gene_shards"]) == 8, "Perk levels cost 4, 7 and 11 shards")
+	_expect(SaveService.perk_purchase(data, "reserve_cells").is_empty(), "Capped perk rejects more purchases")
+	_expect(SaveService.perk_purchase(data, "unknown").is_empty(), "Unknown perk is rejected")
+	var board := GameBoard.new()
+	board.configure(42, "normal", 1, {"reserve_cells": 3, "core_lattice": 2, "wave_metabolism": 1, "reclamation": 1, "signal_enzymes": 2})
+	_expect(board.charge == 250 and board.integrity == 22, "Run starts with permanent resource perks")
+	_expect(board._perk_level("wave_metabolism") == 1 and board._perk_level("signal_enzymes") == 2, "Other permanent perks reach the board")
+	var relay := board.graph.place_node(&"relay", Vector2i(13, 3), 0)
+	board.sell_node(relay)
+	_expect(board.charge == 281, "Reclamation raises the recycling refund")
+	board.current_wave = 1
+	board._finish_delay = 0.1
+	board._check_wave_complete(0.2)
+	_expect(board.charge == 324, "Wave Metabolism raises the wave payout")
+	board.free()
+
+func _test_gene_lab_ui() -> void:
+	var menu: Variant = load("res://scripts/main.gd").new()
+	menu.save_data = SaveService.defaults()
+	menu._show_store()
+	var buttons: Array = menu.find_children("*", "Button", true, false)
+	_expect(buttons.size() >= 17, "Gene Lab shows perk, card, pack and back actions")
+	menu.free()
 
 func _test_wave_determinism() -> void:
 	var first := RunGenerator.generate_run(424242)
@@ -137,6 +229,7 @@ func _test_progression_defaults() -> void:
 	_expect(SaveService.owned_card_ids(data).size() == 8, "Advanced cards must begin locked")
 	data["owned_packs"].append("advanced_network_pack")
 	_expect(SaveService.owned_card_ids(data).size() == 12, "Advanced entitlement must unlock four cards")
+	_expect(SaveService.perk_level(data, "reserve_cells") == 0, "Legacy save without perks defaults to zero")
 
 func _test_build_policy() -> void:
 	_expect(GameController.is_build_allowed("easy", true), "Easy mode must allow building during combat")

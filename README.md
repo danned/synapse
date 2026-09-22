@@ -100,4 +100,4 @@ chance of committing secrets.
 
 ## Progression and purchases
 
-The browser slice persists its deck, Gene Shards, settings, tutorial state, and simulated entitlement under `user://`. The Gene Lab uses `DebugPurchaseProvider`; it never processes real money. A future native release can replace this provider with platform-specific billing while leaving collection and save logic unchanged.
+The browser slice persists its deck, Gene Shards, individually unlocked gene cards, three-level permanent perks, settings, tutorial state, and simulated entitlement under `user://`. The Gene Lab sells eight gene cards for 6 shards each and five permanent perks for 4, 7, then 11 shards per level. Permanent perks apply in every difficulty; cards still need a deck slot and an in-run draft. The existing Advanced Network Pack uses `DebugPurchaseProvider`; it never processes real money. A future native release can replace this provider with platform-specific billing while leaving collection and save logic unchanged.

@@ -33,6 +33,8 @@ func child_capacity(node_id: int) -> int:
 		return 0
 	if node["type"] == &"relay":
 		return 3 + int(modifiers["relay_children_bonus"])
+	if node["type"] in [&"arc", &"cryo", &"lance"]:
+		return 1 + int(modifiers["weapon_children_bonus"])
 	return 1
 
 func link_reach(tower_type: StringName) -> float:
@@ -141,6 +143,9 @@ func outgoing_for_pulse(node_id: int) -> Array[int]:
 	if bool(modifiers["synchronized_split"]) and count % 4 == 0:
 		return Array(children, TYPE_INT, "", null)
 	var index := int(_round_robin.get(node_id, 0)) % children.size()
+	if bool(modifiers["twin_gate"]) and count % 3 == 0 and children.size() > 1:
+		_round_robin[node_id] = index + 2
+		return [int(children[index]), int(children[(index + 1) % children.size()])]
 	_round_robin[node_id] = index + 1
 	return [int(children[index])]
 

@@ -242,7 +242,7 @@ func _start_new_run(level: int, difficulty_id: String, requested_seed: int, load
 	game.exit_requested.connect(_show_level_map)
 	game.run_ended.connect(_on_run_ended)
 	game.tutorial_completed.connect(_on_tutorial_completed)
-	game.setup(difficulty_id, seed_to_use, save_data["deck"], not bool(save_data["tutorial_seen"]), level, loadout)
+	game.setup(difficulty_id, seed_to_use, save_data["deck"], not bool(save_data["tutorial_seen"]), level, loadout, save_data.get("perks", {}))
 	sound_manager.play_music(&"ambient")
 
 func _on_tutorial_completed() -> void:
@@ -307,7 +307,7 @@ func _show_deck_builder() -> void:
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(grid)
 	var buttons: Dictionary = {}
-	for id in GameData.BASE_CARD_IDS + GameData.ADVANCED_CARD_IDS:
+	for id in GameData.BASE_CARD_IDS + GameData.ADVANCED_CARD_IDS + GameData.GENE_CARD_IDS:
 		var card: Dictionary = GameData.card_definitions()[id]
 		var button := Button.new()
 		button.toggle_mode = true
@@ -351,7 +351,7 @@ func _show_deck_builder() -> void:
 
 func _show_store() -> void:
 	_clear_content()
-	var shell := _page_shell("GENE LAB", "Unlock known cards directly. No random paid packs.")
+	var shell := _page_shell("GENE LAB", "Spend shards on permanent perks or new draft cards.")
 	var body: VBoxContainer = shell["body"]
 	var shard_label := Label.new()
 	shard_label.text = "GENE SHARDS  %d" % int(save_data["gene_shards"])
@@ -359,10 +359,65 @@ func _show_store() -> void:
 	shard_label.add_theme_font_size_override("font_size", 24)
 	shard_label.add_theme_color_override("font_color", Color("ff5ba7"))
 	body.add_child(shard_label)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(1040, 475)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_child(scroll)
+	var store_content := VBoxContainer.new()
+	store_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(store_content)
+	var perk_title := Label.new()
+	perk_title.text = "PERMANENT GENE UPGRADES"
+	perk_title.add_theme_font_size_override("font_size", 22)
+	perk_title.add_theme_color_override("font_color", Color("62f4d2"))
+	store_content.add_child(perk_title)
+	var perks := GameData.perk_definitions()
+	for id in GameData.PERK_IDS:
+		var level := SaveService.perk_level(save_data, id)
+		var row := HBoxContainer.new()
+		store_content.add_child(row)
+		var details := Label.new()
+		details.text = "%s  •  %d / 3\n%s" % [perks[id]["name"], level, perks[id]["description"]]
+		details.custom_minimum_size = Vector2(740, 60)
+		details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(details)
+		var upgrade := Button.new()
+		upgrade.custom_minimum_size = Vector2(240, 56)
+		upgrade.text = "MAX LEVEL" if level >= 3 else "UPGRADE • %d SHARDS" % int(GameData.PERK_COSTS[level])
+		upgrade.disabled = level >= 3 or (level < 3 and int(save_data["gene_shards"]) < int(GameData.PERK_COSTS[level]))
+		upgrade.pressed.connect(_purchase_perk.bind(id))
+		row.add_child(upgrade)
+	var card_title := Label.new()
+	card_title.text = "NEW MUTATION CARDS"
+	card_title.add_theme_font_size_override("font_size", 22)
+	card_title.add_theme_color_override("font_color", Color("9c82ff"))
+	store_content.add_child(card_title)
+	var cards := GameData.card_definitions()
+	for id in GameData.GENE_CARD_IDS:
+		var row := HBoxContainer.new()
+		store_content.add_child(row)
+		var details := Label.new()
+		details.text = "%s\n%s" % [cards[id]["name"], cards[id]["description"]]
+		details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		details.custom_minimum_size = Vector2(740, 65)
+		details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(details)
+		var owned_card: bool = id in save_data.get("owned_gene_cards", [])
+		var unlock := Button.new()
+		unlock.custom_minimum_size = Vector2(240, 56)
+		unlock.text = "OWNED" if owned_card else "UNLOCK • %d SHARDS" % GameData.GENE_CARD_COST
+		unlock.disabled = owned_card or int(save_data["gene_shards"]) < GameData.GENE_CARD_COST
+		unlock.pressed.connect(_purchase_gene_card.bind(id))
+		row.add_child(unlock)
+	var pack_title := Label.new()
+	pack_title.text = "ADVANCED NETWORK PACK"
+	pack_title.add_theme_font_size_override("font_size", 22)
+	pack_title.add_theme_color_override("font_color", Color("9c82ff"))
+	store_content.add_child(pack_title)
 	var product: Dictionary = purchase_provider.list_products()[0]
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(860, 360)
-	body.add_child(panel)
+	store_content.add_child(panel)
 	var column := VBoxContainer.new()
 	panel.add_child(column)
 	var title := Label.new()
@@ -408,6 +463,22 @@ func _show_store() -> void:
 	column.add_child(disclaimer)
 	_add_back_button(body, _show_main_menu)
 
+func _purchase_gene_card(id: String) -> void:
+	_commit_gene_purchase(SaveService.gene_card_purchase(save_data, id))
+
+func _purchase_perk(id: String) -> void:
+	_commit_gene_purchase(SaveService.perk_purchase(save_data, id))
+
+func _commit_gene_purchase(updated: Dictionary) -> void:
+	if updated.is_empty():
+		return
+	if not SaveService.save_data(updated):
+		_show_notice("Could not save Gene Lab purchase")
+		return
+	save_data = updated
+	sound_manager.play_sfx(&"unlock")
+	_show_store()
+
 func _unlock_advanced_with_shards() -> void:
 	if int(save_data["gene_shards"]) < 12 or "advanced_network_pack" in save_data["owned_packs"]:
 		return
@@ -433,7 +504,7 @@ func _show_how_to_play() -> void:
 	var shell := _page_shell("HOW TO ROUTE POWER", "Placement controls both link effects and tower attacks.")
 	var body: VBoxContainer = shell["body"]
 	var guide := Label.new()
-	guide.text = "CAMPAIGN\nChoose a level on the signal map, select a difficulty, then bring three turret types. Clearing a level opens the next route and Endless for the route you cleared.\n\nBUILD\nChoose a tower, tap an empty cell to preview its nearest valid parent, then tap again to confirm. Connections cannot pass through dark scar tissue unless Phase Axon is active. Select a node to rewire or recycle its whole branch.\n\nPULSES\nThe Core sends pulses down every root branch. A destination tower defines the inbound link effect, then fires when the pulse arrives. Relays rotate between child branches, so coverage trades against cadence.\n\nCOUNTERS\nHusks resist turrets, Phase Mites resist links, Splitters release crawlers, and Conductors speed nearby enemies. Leeches and the Severer disable crossed links.\n\nDRAFTS\nAfter every second wave, select a topology mutation from your eight-card deck. Cards last for the current run."
+	guide.text = "CAMPAIGN\nChoose a level on the signal map, select a difficulty, then bring three turret types. Clearing a level opens the next route and Endless for the route you cleared.\n\nBUILD\nChoose a tower, tap an empty cell to preview its nearest valid parent, then tap again to confirm. Connections cannot pass through dark scar tissue unless Phase Axon is active. Select a node to rewire or recycle its whole branch.\n\nPULSES\nThe Core sends pulses down every root branch. A destination tower defines the inbound link effect, then fires when the pulse arrives. Relays rotate between child branches, so coverage trades against cadence.\n\nCOUNTERS\nHusks resist turrets, Phase Mites resist links, Splitters release crawlers, and Conductors speed nearby enemies. Leeches and the Severer disable crossed links.\n\nDRAFTS & GENES\nAfter every second wave, choose a mutation from your eight-card deck. Drafted cards last for this run. The Gene Lab unlocks more card choices and permanent perks that apply to every run."
 	guide.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	guide.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	guide.add_theme_font_size_override("font_size", 18)

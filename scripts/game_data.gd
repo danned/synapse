@@ -16,6 +16,22 @@ const BASE_CARD_IDS := [
 const ADVANCED_CARD_IDS := [
 	"synchronized_split", "parallel_roots", "phase_axon", "cross_synapse"
 ]
+const GENE_CARD_IDS := [
+	"weapon_junction", "twin_gate", "core_metronome", "arc_cascade",
+	"cryo_bloom", "lance_fan", "recovery_sheath", "conductive_mark"
+]
+const GENE_CARD_COST := 6
+const PERK_IDS := ["reserve_cells", "core_lattice", "wave_metabolism", "reclamation", "signal_enzymes"]
+const PERK_COSTS := [4, 7, 11]
+
+static func perk_definitions() -> Dictionary:
+	return {
+		"reserve_cells": {"name": "Reserve Cells", "description": "+10 starting charge per level."},
+		"core_lattice": {"name": "Core Lattice", "description": "+1 starting integrity per level."},
+		"wave_metabolism": {"name": "Wave Metabolism", "description": "+3 charge after each wave per level."},
+		"reclamation": {"name": "Reclamation", "description": "+3% branch recycling refund per level."},
+		"signal_enzymes": {"name": "Signal Enzymes", "description": "+3% pulse travel speed per level."}
+	}
 
 static func tower_definitions() -> Dictionary:
 	return {
@@ -108,7 +124,15 @@ static func card_definitions() -> Dictionary:
 		"synchronized_split": _card("Synchronized Split", "Every fourth Relay pulse feeds every child branch.", true),
 		"parallel_roots": _card("Parallel Roots", "The Core gains a third full-cadence root branch.", true),
 		"phase_axon": _card("Phase Axon", "Links ignore scar tissue and gain extra reach.", true),
-		"cross_synapse": _card("Cross-Synapse", "Intersecting active links create a damaging resonance burst.", true)
+		"cross_synapse": _card("Cross-Synapse", "Intersecting active links create a damaging resonance burst.", true),
+		"weapon_junction": _card("Weapon Junction", "Arc, Cryo and Lance nodes gain one child port.", false),
+		"twin_gate": _card("Twin Gate", "Every third Relay arrival feeds two successive branches.", false),
+		"core_metronome": _card("Core Metronome", "Core pulses launch 10% more often.", false),
+		"arc_cascade": _card("Arc Cascade", "Arc attacks chain to one additional target.", false),
+		"cryo_bloom": _card("Cryo Bloom", "Cryo attacks briefly root enemies near their target.", false),
+		"lance_fan": _card("Lance Fan", "Lance beams are wider.", false),
+		"recovery_sheath": _card("Recovery Sheath", "Severed links recover 35% faster.", false),
+		"conductive_mark": _card("Conductive Mark", "Marked enemies take 25% more link damage.", false)
 	}
 
 static func _card(title: String, description: String, advanced: bool) -> Dictionary:
@@ -128,6 +152,14 @@ static func card_modifier(card_id: String) -> Dictionary:
 		"parallel_roots": return {"core_children_bonus": 1}
 		"phase_axon": return {"phase_axon": true, "link_range_bonus": 0.5}
 		"cross_synapse": return {"cross_synapse": true}
+		"weapon_junction": return {"weapon_children_bonus": 1}
+		"twin_gate": return {"twin_gate": true}
+		"core_metronome": return {"core_interval_mult": 0.9}
+		"arc_cascade": return {"arc_targets_bonus": 1}
+		"cryo_bloom": return {"cryo_bloom": true}
+		"lance_fan": return {"lance_width_bonus": 0.12}
+		"recovery_sheath": return {"disable_duration_mult": 0.65}
+		"conductive_mark": return {"conductive_mark": true}
 	return {}
 
 static func empty_modifiers() -> Dictionary:
@@ -138,7 +170,11 @@ static func empty_modifiers() -> Dictionary:
 		"priority_gate": false, "cryo_trail_bonus": 0.0,
 		"bidirectional_lance": false, "lance_range_bonus": 0.0,
 		"synchronized_split": false, "core_children_bonus": 0,
-		"phase_axon": false, "cross_synapse": false
+		"phase_axon": false, "cross_synapse": false,
+		"weapon_children_bonus": 0, "twin_gate": false,
+		"core_interval_mult": 1.0, "arc_targets_bonus": 0,
+		"cryo_bloom": false, "lance_width_bonus": 0.0,
+		"disable_duration_mult": 1.0, "conductive_mark": false
 	}
 
 static func difficulty_name(id: String) -> String:
