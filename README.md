@@ -54,21 +54,29 @@ Run the game as a Web export without sharing the host display server:
 
 Open `http://127.0.0.1:8060/`. The port is published on host loopback only.
 
-To run Codex with full permissions inside the container, authenticate once and
-start it from the repository root:
+To run Codex with full permissions inside the container, start it from the
+repository root:
 
 ```bash
-./scripts/sandbox login
 ./scripts/sandbox codex
 ```
 
-`sandbox codex` deliberately disables Codex's inner approval sandbox. Docker is
-the outer boundary: only this repository is bind-mounted, the container is not
-privileged, no Docker socket or host home directory is mounted, and CPU, memory,
-and process limits are applied. The container does have outbound network access,
-which Codex and package managers require. Use full-access mode only for trusted
-repositories because processes in the container can read the mounted repository
-and the dedicated Codex credential volume.
+The Compose service mounts only the host login file at `~/.codex/auth.json`, so
+an existing Codex login is reused automatically. Set `CODEX_AUTH_FILE` if your
+login file is elsewhere. The mount is writable so refreshed credentials persist
+on the host. `./scripts/sandbox login` remains available if reauthentication is
+needed.
+
+The container mounts `.sandbox/codex.config.toml` as its Codex configuration, so
+every `codex` invocation defaults to `danger-full-access` with no approval
+prompts—even when started from `./scripts/sandbox shell` or directly through
+Compose. Docker is the outer boundary: only this repository is bind-mounted, the
+container is not privileged, no Docker socket or host home directory is mounted,
+and CPU, memory, and process limits are applied. The one host credential file
+described above is mounted explicitly. The container does have outbound network
+access, which Codex and package managers require. Use full-access mode only for
+trusted repositories because processes in the container can read the mounted
+repository and Codex credential.
 
 Useful commands:
 

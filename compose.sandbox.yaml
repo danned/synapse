@@ -26,6 +26,15 @@ services:
       - type: volume
         source: codex-data
         target: /home/sandbox/.codex
+      - type: bind
+        source: ${CODEX_AUTH_FILE:-${HOME}/.codex/auth.json}
+        target: /home/sandbox/.codex/auth.json
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.sandbox/codex.config.toml
+        target: /home/sandbox/.codex/config.toml
+        read_only: true
       - type: volume
         source: npm-cache
         target: /home/sandbox/.npm

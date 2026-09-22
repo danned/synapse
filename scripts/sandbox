@@ -7,6 +7,7 @@ compose_file="${repo_root}/compose.sandbox.yaml"
 
 export SANDBOX_UID="${SANDBOX_UID:-$(id -u)}"
 export SANDBOX_GID="${SANDBOX_GID:-$(id -g)}"
+export CODEX_AUTH_FILE="${CODEX_AUTH_FILE:-${HOME}/.codex/auth.json}"
 
 compose() {
 	docker compose --project-directory "${repo_root}" --file "${compose_file}" "$@"
@@ -26,8 +27,8 @@ Commands:
   run COMMAND [...]  Run any command inside a fresh sandbox container.
   down                Remove stopped containers and the sandbox network.
 
-The repository is the only host path mounted into the container. Codex credentials
-and the npm cache live in Docker-managed volumes and survive between runs.
+The repository and host Codex auth file are the only host paths mounted into the
+container. Other Codex state and the npm cache live in Docker-managed volumes.
 EOF
 }
 
@@ -44,7 +45,7 @@ case "${command}" in
 		compose run --rm sandbox bash "$@"
 		;;
 	codex)
-		compose run --rm sandbox codex --dangerously-bypass-approvals-and-sandbox "$@"
+		compose run --rm sandbox codex "$@"
 		;;
 	login)
 		compose run --rm sandbox codex login --device-auth "$@"
