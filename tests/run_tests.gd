@@ -22,6 +22,7 @@ func _run_tests() -> void:
 	_test_run_mutators()
 	_test_mutator_ui()
 	_test_wave_fuzzing()
+	_test_wave_objectives()
 	_test_level_layouts()
 	_test_campaign_waves()
 	_test_endless_scaling()
@@ -321,6 +322,83 @@ func _test_wave_fuzzing() -> void:
 				_expect(int(entry["lane"]) in [0, 1], "Generated an invalid lane")
 				_expect(float(entry["time"]) >= last_time, "Spawn times must be sorted")
 				last_time = float(entry["time"])
+
+func _test_wave_objectives() -> void:
+	for wave_number in range(1, 16):
+		var manifest := RunGenerator.generate_wave(2026, wave_number, 5, true)
+		var goal: Dictionary = manifest["objective"]
+		_expect(goal.is_empty() == (wave_number % 3 != 0), "Only every third wave should have a goal")
+		if goal.is_empty():
+			continue
+		_expect(int(goal["bonus"]) == 20, "Goals should offer a fixed charge bonus")
+		if wave_number % 6 == 0:
+			_expect(goal["kind"] == "no_leaks", "Every second goal should protect a lane")
+			var summary := RunGenerator.summarize(manifest)
+			_expect(int(summary["lanes"][int(goal["lane"])]) > 0, "Protected lane must have enemies")
+		else:
+			_expect(goal["kind"] == "marked_kill", "Other goals should mark an enemy")
+			_expect(int(goal["entry_index"]) >= 0 and int(goal["entry_index"]) < manifest["entries"].size(), "Marked entry must exist")
+		_expect(manifest == RunGenerator.generate_wave(2026, wave_number, 5, true), "Goal generation must be deterministic")
+	var marked_entries: Array[Dictionary] = [{"time": 0.0, "type": &"crawler", "lane": 0}]
+	var marked_manifest := {"wave": 3, "entries": marked_entries, "objective": {"kind": "marked_kill", "entry_index": 0, "bonus": 20}}
+	var early := GameBoard.new()
+	early.configure(42, "normal")
+	early.start_wave(marked_manifest)
+	early._spawn_ready_enemies()
+	_expect(early.objective_enemy_id == int(early.enemies[0]["id"]), "Marked goal must follow the spawned enemy")
+	early._damage_enemy(0, 1000.0, false)
+	_expect(early.objective_status == &"complete", "Killing the mark before midpoint should secure the goal")
+	early._check_wave_complete(0.8)
+	_expect(early.charge == 295, "Early marked kill should earn enemy, normal, and bonus charge")
+	early._check_wave_complete(0.8)
+	_expect(early.charge == 295, "Wave completion must not pay twice")
+	early.free()
+	var late := GameBoard.new()
+	late.configure(42, "normal")
+	late.start_wave(marked_manifest)
+	late._spawn_ready_enemies()
+	late.enemies[0]["segment"] = 8
+	late.enemies[0]["segment_t"] = 0.5
+	late._damage_enemy(0, 1000.0, false)
+	_expect(late.objective_status == &"failed", "A kill at midpoint should be too late")
+	late._check_wave_complete(0.8)
+	_expect(late.charge == 275, "Failed marked goal must keep normal payout")
+	late.free()
+	var crossed := GameBoard.new()
+	crossed.configure(42, "normal")
+	crossed.start_wave(marked_manifest)
+	crossed._spawn_ready_enemies()
+	crossed.enemies[0]["segment"] = 8
+	crossed.enemies[0]["segment_t"] = 0.49
+	crossed._update_enemies(0.1)
+	_expect(crossed.objective_status == &"failed", "Crossing midpoint should fail the mark before it is killed")
+	crossed.free()
+	var lane_entries: Array[Dictionary] = [{"time": 0.0, "type": &"crawler", "lane": 0}, {"time": 0.0, "type": &"crawler", "lane": 1}]
+	var lane_manifest := {"wave": 6, "entries": lane_entries, "objective": {"kind": "no_leaks", "lane": 0, "bonus": 20}}
+	var defended := GameBoard.new()
+	defended.configure(42, "normal")
+	defended.start_wave(lane_manifest)
+	defended._spawn_ready_enemies()
+	defended.enemies[1]["segment"] = defended.bottom_path.size() - 2
+	defended.enemies[1]["segment_t"] = 0.99
+	defended._update_enemies(0.1)
+	_expect(defended.objective_status == &"active", "A leak on the other lane should preserve the goal")
+	defended._damage_enemy(0, 1000.0, false)
+	defended._check_wave_complete(0.8)
+	_expect(defended.objective_status == &"complete" and defended.charge == 310, "Protected lane should earn bonus despite other lane leak")
+	defended.free()
+	var leaked := GameBoard.new()
+	leaked.configure(42, "normal")
+	leaked.start_wave(lane_manifest)
+	leaked._spawn_ready_enemies()
+	leaked.enemies[0]["segment"] = leaked.top_path.size() - 2
+	leaked.enemies[0]["segment_t"] = 0.99
+	leaked._update_enemies(0.1)
+	_expect(leaked.objective_status == &"failed", "Protected lane leak should fail the goal")
+	leaked._damage_enemy(0, 1000.0, false)
+	leaked._check_wave_complete(0.8)
+	_expect(leaked.charge == 290, "Failed lane goal must keep normal payout")
+	leaked.free()
 
 func _test_progression_defaults() -> void:
 	var data := SaveService.defaults()
@@ -667,6 +745,11 @@ func _test_controller_setup() -> void:
 	_expect("48" in controller.tower_buttons[&"relay"].text, "Build bar must show mutator-adjusted costs")
 	_expect("MUTATORS 3" in controller.mode_label.text and "Short Links" in controller.mode_label.tooltip_text, "HUD exposes active mutators and descriptions")
 	_expect(controller.board.top_path == LevelData.layout(3)["top_path"], "Controller must pass selected layout to board")
+	controller.next_wave_index = 2
+	controller._update_wave_preview()
+	_expect(controller.objective_label.visible and controller.objective_label.text.contains("BONUS +20"), "Upcoming objective must appear before launch")
+	controller._launch_next_wave()
+	_expect(controller.board.current_wave == 3 and controller.objective_label.text.contains("ACTIVE"), "Active objective must stay visible after preview advances")
 	controller.next_wave_index = 10
 	controller._ensure_next_manifest()
 	_expect(controller.manifests.size() == 11 and int(controller.manifests[10]["wave"]) == 11, "Endless must generate the next wave on demand")

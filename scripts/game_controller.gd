@@ -23,6 +23,7 @@ var mode_label: Label
 var intel_label: Label
 var intel_types: VBoxContainer
 var intel_meta_label: Label
+var objective_label: Label
 var status_label: Label
 var start_button: Button
 var pause_button: Button
@@ -38,6 +39,7 @@ var tower_buttons: Dictionary = {}
 var countdown := -1.0
 var _last_countdown_second := -1
 var _run_over := false
+var _last_objective_result := ""
 var _exit_confirmation: Control
 var _specialization_overlay: Control
 var sound_manager: SoundManager
@@ -145,6 +147,11 @@ func _build_ui() -> void:
 	intel_meta_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	intel_meta_label.add_theme_font_size_override("font_size", 13)
 	intel_column.add_child(intel_meta_label)
+	objective_label = Label.new()
+	objective_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	objective_label.add_theme_font_size_override("font_size", 12)
+	objective_label.add_theme_color_override("font_color", Color("fff27a"))
+	intel_column.add_child(objective_label)
 	var legend := Label.new()
 	legend.text = "▲ TOP LANE\n▼ BOTTOM\n\nPulses route\nfrom the Core."
 	legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -166,6 +173,7 @@ func _build_ui() -> void:
 	board.sfx_requested.connect(_play_sound)
 	board.coverage_changed.connect(_update_coverage_readout)
 	board.specialization_state_changed.connect(_refresh_specialization_ui)
+	board.objective_changed.connect(_on_objective_changed)
 
 	var bottom := PanelContainer.new()
 	bottom.position = Vector2(8, 604)
@@ -491,6 +499,7 @@ func _launch_next_wave() -> void:
 	board.set_combat_paused(false)
 	pause_button.text = "PAUSE"
 	var manifest := manifests[next_wave_index]
+	_last_objective_result = ""
 	board.start_wave(manifest)
 	if is_instance_valid(sound_manager):
 		var boss_wave := false
@@ -510,6 +519,9 @@ func _on_wave_finished() -> void:
 		sound_manager.play_music(&"ambient")
 	if _run_over:
 		return
+	if not board.objective.is_empty():
+		_last_objective_result = "LAST GOAL\n+%d CHARGE" % int(board.objective["bonus"]) if board.objective_status == &"complete" else "LAST GOAL\nFAILED"
+	_update_objective_readout()
 	if difficulty != "endless" and next_wave_index >= GameData.MAX_WAVES:
 		_finish_run(true)
 		return
@@ -571,6 +583,7 @@ func _update_wave_preview() -> void:
 	if next_wave_index >= manifests.size():
 		intel_label.text = "NO FURTHER\nSIGNALS"
 		intel_meta_label.text = ""
+		_update_objective_readout()
 		return
 	var manifest := manifests[next_wave_index]
 	var summary := RunGenerator.summarize(manifest)
@@ -591,6 +604,37 @@ func _update_wave_preview() -> void:
 			var boss_warning := "\n\nBOSS SIGNAL" if next_wave_index == 9 else ""
 			var support_warning := "\n\nSUPPORT SIGNAL" if summary["counts"].has(&"shielder") else ""
 			intel_meta_label.text = "THREAT\n%s%s%s" % [_threat_word(int(summary["total"])), support_warning, boss_warning]
+	_update_objective_readout()
+
+func _on_objective_changed(_status: StringName) -> void:
+	_update_objective_readout()
+
+func _update_objective_readout() -> void:
+	var lines: Array[String] = []
+	if board.wave_active:
+		if not board.objective.is_empty():
+			lines.append(_objective_text(board.objective, manifests[board.current_wave - 1]))
+			match board.objective_status:
+				&"complete": lines.append("SECURED")
+				&"failed": lines.append("FAILED")
+				_: lines.append("ACTIVE")
+	else:
+		if not _last_objective_result.is_empty():
+			lines.append(_last_objective_result)
+		if next_wave_index < manifests.size():
+			var manifest := manifests[next_wave_index]
+			var next_objective: Dictionary = manifest.get("objective", {})
+			if not next_objective.is_empty():
+				lines.append(_objective_text(next_objective, manifest))
+	objective_label.text = "\n\n".join(lines)
+	objective_label.visible = not lines.is_empty()
+
+func _objective_text(goal: Dictionary, manifest: Dictionary) -> String:
+	if goal["kind"] == "no_leaks":
+		return "BONUS +%d\nNO LEAKS\n%s LANE" % [int(goal["bonus"]), "▲ TOP" if int(goal["lane"]) == 0 else "▼ BOTTOM"]
+	var entry: Dictionary = manifest["entries"][int(goal["entry_index"])]
+	var name := str(GameData.enemy_definitions()[entry["type"]]["name"]).to_upper()
+	return "BONUS +%d\nKILL MARKED\n%s %s\nBEFORE MIDPOINT" % [int(goal["bonus"]), name, "▲" if int(entry["lane"]) == 0 else "▼"]
 
 func _add_intel_type_row(type: StringName, row_text: String) -> void:
 	var row := HBoxContainer.new()

@@ -10,6 +10,7 @@ signal message_requested(text: String)
 signal sfx_requested(event: StringName)
 signal coverage_changed
 signal specialization_state_changed
+signal objective_changed(status: StringName)
 
 const CELL_SIZE := 64.0
 const LINK_WIDTH := 0.42
@@ -41,6 +42,9 @@ var rewire_mode := false
 var build_allowed := true
 var combat_paused := false
 var wave_active := false
+var objective: Dictionary = {}
+var objective_status: StringName = &""
+var objective_enemy_id := -1
 
 var enemies: Array[Dictionary] = []
 var pulses: Array[Dictionary] = []
@@ -56,6 +60,7 @@ var next_pulse_id := 1
 var disabled_links: Dictionary = {}
 var resonance_hits: Dictionary = {}
 var _finish_delay := -1.0
+var _paid_wave_number := -1
 
 var top_path: Array[Vector2i] = [
 	Vector2i(0, 1), Vector2i(1, 1), Vector2i(2, 1), Vector2i(3, 1),
@@ -100,6 +105,10 @@ func configure(seed_value: int, difficulty_id: String, level_id: int = 1, perks:
 	if "narrow_conduits" in run_mutators: graph.modifiers["link_width_mult"] *= 0.75
 	graph.changed.connect(_on_graph_changed)
 	rift_zones.clear()
+	objective.clear()
+	objective_status = &""
+	objective_enemy_id = -1
+	_paid_wave_number = -1
 	charge_changed.emit(charge)
 	integrity_changed.emit(integrity)
 	queue_redraw()
@@ -215,6 +224,9 @@ func set_combat_paused(value: bool) -> void:
 
 func start_wave(manifest: Dictionary) -> void:
 	current_wave = int(manifest["wave"])
+	objective = manifest.get("objective", {}).duplicate(true)
+	objective_status = &"active" if not objective.is_empty() else &""
+	objective_enemy_id = -1
 	wave_hp_scale = float(manifest.get("hp_scale", 1.0))
 	wave_speed_scale = float(manifest.get("speed_scale", 1.0))
 	spawn_entries = manifest["entries"].duplicate(true)
@@ -223,8 +235,10 @@ func start_wave(manifest: Dictionary) -> void:
 	pulse_timer = 0.0
 	wave_active = true
 	_finish_delay = -1.0
+	_paid_wave_number = -1
 	graph.reset_routing()
 	resonance_hits.clear()
+	objective_changed.emit(objective_status)
 	sfx_requested.emit(&"launch")
 	queue_redraw()
 
@@ -316,10 +330,12 @@ func _process(delta: float) -> void:
 func _spawn_ready_enemies() -> void:
 	while spawn_index < spawn_entries.size() and float(spawn_entries[spawn_index]["time"]) <= wave_time:
 		var entry: Dictionary = spawn_entries[spawn_index]
-		_spawn_enemy(entry["type"], int(entry["lane"]))
+		var enemy_id := _spawn_enemy(entry["type"], int(entry["lane"]))
+		if objective.get("kind", "") == "marked_kill" and spawn_index == int(objective["entry_index"]):
+			objective_enemy_id = enemy_id
 		spawn_index += 1
 
-func _spawn_enemy(type: StringName, lane: int, segment: int = 0, segment_t: float = 0.0, hp_fraction: float = 1.0, reward_override: int = -1) -> void:
+func _spawn_enemy(type: StringName, lane: int, segment: int = 0, segment_t: float = 0.0, hp_fraction: float = 1.0, reward_override: int = -1) -> int:
 	var definition: Dictionary = GameData.enemy_definitions()[type]
 	var health := float(definition["hp"]) * wave_hp_scale * hp_fraction * (1.25 if "armored_signals" in run_mutators else 1.0)
 	var enemy := {
@@ -333,6 +349,7 @@ func _spawn_enemy(type: StringName, lane: int, segment: int = 0, segment_t: floa
 	enemy["position"] = _enemy_position(enemy)
 	next_enemy_id += 1
 	enemies.append(enemy)
+	return int(enemy["id"])
 
 func _update_enemies(delta: float) -> void:
 	var leaked: Array[int] = []
@@ -353,6 +370,10 @@ func _update_enemies(delta: float) -> void:
 				speed *= float(enemy["slow_factor"])
 			_advance_enemy(enemy, speed * delta)
 		enemy["position"] = _enemy_position(enemy)
+		if objective_status == &"active" and int(enemy["id"]) == objective_enemy_id:
+			var midpoint := float(_path_for_lane(int(enemy["lane"])).size() - 1) * 0.5
+			if _enemy_progress(enemy) >= midpoint:
+				_set_objective_status(&"failed")
 		if enemy["type"] == &"leech" or enemy["type"] == &"severer":
 			_try_disable_link(enemy)
 		if int(enemy["segment"]) >= _path_for_lane(int(enemy["lane"])).size() - 1:
@@ -361,6 +382,8 @@ func _update_enemies(delta: float) -> void:
 	for reverse_index in range(leaked.size() - 1, -1, -1):
 		var index: int = leaked[reverse_index]
 		var type: StringName = enemies[index]["type"]
+		if objective_status == &"active" and objective.get("kind", "") == "no_leaks" and int(enemies[index]["lane"]) == int(objective["lane"]):
+			_set_objective_status(&"failed")
 		integrity -= int(GameData.enemy_definitions()[type]["leak"])
 		effects.append({"type": "burst", "position": _cell_center(GameData.CORE_CELL), "ttl": 0.5, "color": Color("ff397c")})
 		enemies.remove_at(index)
@@ -619,6 +642,9 @@ func _damage_enemy(index: int, raw_amount: float, from_link: bool, ignore_armor:
 		amount *= SHIELD_DAMAGE_MULT
 	enemy["hp"] = float(enemy["hp"]) - amount
 	if float(enemy["hp"]) <= 0.0:
+		if objective_status == &"active" and int(enemy["id"]) == objective_enemy_id:
+			var midpoint := float(_path_for_lane(int(enemy["lane"])).size() - 1) * 0.5
+			_set_objective_status(&"complete" if _enemy_progress(enemy) < midpoint else &"failed")
 		var definition: Dictionary = GameData.enemy_definitions()[enemy["type"]]
 		charge += int(enemy["reward_override"]) if int(enemy.get("reward_override", -1)) >= 0 else int(definition["reward"])
 		charge_changed.emit(charge)
@@ -668,6 +694,8 @@ func _pulse_position(pulse: Dictionary) -> Vector2:
 	return _node_position(int(pulse["from"])).lerp(_node_position(int(pulse["to"])), clampf(float(pulse["progress"]), 0.0, 1.0))
 
 func _check_wave_complete(delta: float) -> void:
+	if _paid_wave_number == current_wave:
+		return
 	if spawn_index < spawn_entries.size() or not enemies.is_empty():
 		_finish_delay = -1.0
 		return
@@ -675,14 +703,25 @@ func _check_wave_complete(delta: float) -> void:
 		_finish_delay = 0.7
 	_finish_delay -= delta
 	if _finish_delay <= 0.0:
+		_paid_wave_number = current_wave
 		wave_active = false
 		pulses.clear()
 		graph.complete_wave(current_wave)
 		specialization_state_changed.emit()
+		if objective_status == &"active" and objective.get("kind", "") == "no_leaks":
+			_set_objective_status(&"complete")
 		charge += 35 + current_wave * 5 + 3 * _perk_level("wave_metabolism") + (20 if "lean_start" in run_mutators else 0)
+		if objective_status == &"complete":
+			charge += int(objective["bonus"])
 		charge_changed.emit(charge)
 		wave_finished.emit()
 		sfx_requested.emit(&"wave_complete")
+
+func _set_objective_status(value: StringName) -> void:
+	if objective_status == value:
+		return
+	objective_status = value
+	objective_changed.emit(value)
 
 func _update_effects(delta: float) -> void:
 	for index in range(effects.size() - 1, -1, -1):
@@ -1005,6 +1044,9 @@ func _draw_enemies() -> void:
 			icon_color.a = 0.76
 		draw_texture_rect(icon, Rect2(pos - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false, icon_color)
 		if enemy["type"] == &"phase": draw_arc(pos, radius + 5, 0, TAU, 18, Color("6fdcff"), 2)
+		if objective_status == &"active" and int(enemy["id"]) == objective_enemy_id:
+			draw_arc(pos, radius + 9, 0, TAU, 24, Color("fff27a"), 3)
+			draw_string(font, pos + Vector2(-18, -radius - 17), "GOAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("fff27a"))
 		if world_time < float(enemy["shield_until"]):
 			draw_arc(pos, radius + 6, 0, TAU, 24, Color("70bfff"), 3)
 		var ratio := clampf(float(enemy["hp"]) / float(enemy["max_hp"]), 0.0, 1.0)

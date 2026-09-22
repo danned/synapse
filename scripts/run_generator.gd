@@ -2,6 +2,7 @@ class_name RunGenerator
 extends RefCounted
 
 const WAVE_BUDGETS := [10.0, 14.0, 19.0, 25.0, 32.0, 40.0, 49.0, 59.0, 70.0, 82.0]
+const OBJECTIVE_BONUS := 20
 
 static func generate_run(seed_value: int, level: int = 1, mutators: Array = []) -> Array[Dictionary]:
 	var waves: Array[Dictionary] = []
@@ -66,8 +67,27 @@ static func generate_wave(seed_value: int, wave_number: int, level: int = 1, end
 		"budget": (base_budget + extra_waves * 5.0) * level_multiplier,
 		"hp_scale": hp_scale,
 		"speed_scale": minf(1.5, 1.0 + extra_waves * 0.015),
-		"entries": entries
+		"entries": entries,
+		"objective": _generate_objective(wave_number, entries)
 	}
+
+static func _generate_objective(wave_number: int, entries: Array[Dictionary]) -> Dictionary:
+	if wave_number % 3 != 0:
+		return {}
+	if wave_number % 6 == 0:
+		var lane_counts := [0, 0]
+		for entry in entries:
+			lane_counts[int(entry["lane"])] += 1
+		return {"kind": "no_leaks", "lane": 1 if lane_counts[1] > lane_counts[0] else 0, "bonus": OBJECTIVE_BONUS}
+	var candidates: Array[int] = []
+	for index in range(entries.size()):
+		if entries[index]["type"] not in [&"severer", &"splitter"]:
+			candidates.append(index)
+	if candidates.is_empty():
+		for index in range(entries.size()):
+			if entries[index]["type"] != &"severer":
+				candidates.append(index)
+	return {"kind": "marked_kill", "entry_index": candidates[candidates.size() / 2], "bonus": OBJECTIVE_BONUS}
 
 static func summarize(wave: Dictionary) -> Dictionary:
 	var counts := {}
