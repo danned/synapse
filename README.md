@@ -14,7 +14,7 @@ The project uses a 1280×720 landscape reference viewport and supports both mous
 
 The signal map contains five levels with distinct enemy routes and ten waves each. Clear a level on any standard difficulty to unlock the next one and Endless on the cleared level. Before each attempt, choose three turret types for the build bar. The four original types are available immediately; Mortar unlocks after level 2 and Rift after level 4. Endless uses Normal build timing, generates waves without a fixed end, and records the best wave survived for each level.
 
-Tower and enemy art credits and license details are in [assets/ART_CREDITS.md](assets/ART_CREDITS.md).
+SYNAPSE's original work is Copyright © 2026 danned. All rights reserved; see [LICENSE](LICENSE). Tower and enemy icon credits and licenses are in [assets/ART_CREDITS.md](assets/ART_CREDITS.md), and bundled audio licenses are in [assets/audio/LICENSES.md](assets/audio/LICENSES.md).
 
 ## Tests
 
@@ -33,6 +33,10 @@ python3 -m http.server 8060 --directory dist/web
 ```
 
 Open `http://127.0.0.1:8060/`. The export uses the Compatibility renderer and single-threaded WebAssembly.
+
+## GitHub Pages
+
+The [Web build workflow](.github/workflows/web-pages.yml) runs the tests, exports the game, and deploys `dist/web` to GitHub Pages when `main` changes. It can also be run manually from the Actions tab. In the repository's **Settings → Pages**, set **Build and deployment → Source** to **GitHub Actions**. After a successful deployment, use the **Visit site** link on that page to play the game. On GitHub Free, the repository must be public to use Pages.
 
 ## Isolated development sandbox
 
