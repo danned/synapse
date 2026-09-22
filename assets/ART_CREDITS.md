@@ -1,6 +1,6 @@
 # Art credits
 
-Tower and enemy icons are by **Lorc**, sourced from [Game-icons.net](https://game-icons.net/), and licensed under [Creative Commons Attribution 3.0 Unported (CC BY 3.0)](https://creativecommons.org/licenses/by/3.0/). The original white, transparent SVGs are distributed in `assets/icons/`; SYNAPSE tints them at runtime. No other changes were made to the source SVGs.
+Tower and enemy icons are by **Lorc**, sourced from [Game-icons.net](https://game-icons.net/), and licensed under [Creative Commons Attribution 3.0 Unported (CC BY 3.0)](https://creativecommons.org/licenses/by/3.0/). White, transparent PNG renderings of the original SVGs are distributed in `assets/icons/`; SYNAPSE tints them at runtime. The format conversion is the only change made to the source artwork.
 
 | Game type | Original icon |
 | --- | --- |

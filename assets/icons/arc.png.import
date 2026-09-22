@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://0vp8cb8ioc3k"
-path="res://.godot/imported/shielder.svg-acffc7eb45ee141ca4cd222d3eaf0224.ctex"
+uid="uid://bpgduqbta72bd"
+path="res://.godot/imported/arc.png-0c03f2808d237a6e6bbfec51b06178da.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/icons/shielder.svg"
-dest_files=["res://.godot/imported/shielder.svg-acffc7eb45ee141ca4cd222d3eaf0224.ctex"]
+source_file="res://assets/icons/arc.png"
+dest_files=["res://.godot/imported/arc.png-0c03f2808d237a6e6bbfec51b06178da.ctex"]
 
 [params]
 
@@ -38,6 +38,3 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
-svg/scale=1.0
-editor/scale_with_editor_scale=false
-editor/convert_colors_with_editor_theme=false

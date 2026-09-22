@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dru0u4gnxjwju"
-path="res://.godot/imported/cryo.svg-e2c6a73a927f1f2b116b6088517dc1ad.ctex"
+uid="uid://220g6v7fxw6q"
+path="res://.godot/imported/shielder.png-6fa63c0f27eaaf814ea14f44d4a84f4c.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/icons/cryo.svg"
-dest_files=["res://.godot/imported/cryo.svg-e2c6a73a927f1f2b116b6088517dc1ad.ctex"]
+source_file="res://assets/icons/shielder.png"
+dest_files=["res://.godot/imported/shielder.png-6fa63c0f27eaaf814ea14f44d4a84f4c.ctex"]
 
 [params]
 
@@ -38,6 +38,3 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
-svg/scale=0.25
-editor/scale_with_editor_scale=false
-editor/convert_colors_with_editor_theme=false

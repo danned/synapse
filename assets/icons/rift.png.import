@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dlaf6gf3lqw5y"
-path="res://.godot/imported/mortar.svg-75874cc4bfef539d2c44cd17e71674d4.ctex"
+uid="uid://cji116okircet"
+path="res://.godot/imported/rift.png-9881908a97c82e4fb06c8f04f0c03ffd.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/icons/mortar.svg"
-dest_files=["res://.godot/imported/mortar.svg-75874cc4bfef539d2c44cd17e71674d4.ctex"]
+source_file="res://assets/icons/rift.png"
+dest_files=["res://.godot/imported/rift.png-9881908a97c82e4fb06c8f04f0c03ffd.ctex"]
 
 [params]
 
@@ -38,6 +38,3 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
-svg/scale=0.25
-editor/scale_with_editor_scale=false
-editor/convert_colors_with_editor_theme=false

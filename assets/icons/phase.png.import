@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bvoauiwiahryg"
-path="res://.godot/imported/crawler.svg-7d2388ed1d0577f714630e5dee99b9a1.ctex"
+uid="uid://cxkx4rravijkl"
+path="res://.godot/imported/phase.png-4501fed55bcd7571eac2bde11b478ac5.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/icons/crawler.svg"
-dest_files=["res://.godot/imported/crawler.svg-7d2388ed1d0577f714630e5dee99b9a1.ctex"]
+source_file="res://assets/icons/phase.png"
+dest_files=["res://.godot/imported/phase.png-4501fed55bcd7571eac2bde11b478ac5.ctex"]
 
 [params]
 
@@ -38,6 +38,3 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
-svg/scale=0.25
-editor/scale_with_editor_scale=false
-editor/convert_colors_with_editor_theme=false

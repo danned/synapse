@@ -2,24 +2,24 @@ class_name GameArt
 extends RefCounted
 
 const TOWER_ICONS := {
-	&"relay": preload("res://assets/icons/relay.svg"),
-	&"arc": preload("res://assets/icons/arc.svg"),
-	&"cryo": preload("res://assets/icons/cryo.svg"),
-	&"lance": preload("res://assets/icons/lance.svg"),
-	&"mortar": preload("res://assets/icons/mortar.svg"),
-	&"rift": preload("res://assets/icons/rift.svg")
+	&"relay": preload("res://assets/icons/relay.png"),
+	&"arc": preload("res://assets/icons/arc.png"),
+	&"cryo": preload("res://assets/icons/cryo.png"),
+	&"lance": preload("res://assets/icons/lance.png"),
+	&"mortar": preload("res://assets/icons/mortar.png"),
+	&"rift": preload("res://assets/icons/rift.png")
 }
 
 const ENEMY_ICONS := {
-	&"crawler": preload("res://assets/icons/crawler.svg"),
-	&"skitter": preload("res://assets/icons/skitter.svg"),
-	&"husk": preload("res://assets/icons/husk.svg"),
-	&"phase": preload("res://assets/icons/phase.svg"),
-	&"leech": preload("res://assets/icons/leech.svg"),
-	&"severer": preload("res://assets/icons/severer.svg"),
-	&"splitter": preload("res://assets/icons/splitter.svg"),
-	&"conductor": preload("res://assets/icons/conductor.svg"),
-	&"shielder": preload("res://assets/icons/shielder.svg")
+	&"crawler": preload("res://assets/icons/crawler.png"),
+	&"skitter": preload("res://assets/icons/skitter.png"),
+	&"husk": preload("res://assets/icons/husk.png"),
+	&"phase": preload("res://assets/icons/phase.png"),
+	&"leech": preload("res://assets/icons/leech.png"),
+	&"severer": preload("res://assets/icons/severer.png"),
+	&"splitter": preload("res://assets/icons/splitter.png"),
+	&"conductor": preload("res://assets/icons/conductor.png"),
+	&"shielder": preload("res://assets/icons/shielder.png")
 }
 
 static func tower_icon(type: StringName) -> Texture2D:

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cr5ierkc7xoyy"
-path="res://.godot/imported/lance.svg-a39e4d715507d9158a02ef6c289124aa.ctex"
+uid="uid://ocjptoxht0gp"
+path="res://.godot/imported/leech.png-79b6d2bd10c1bff3fbdbf24df0e89803.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/icons/lance.svg"
-dest_files=["res://.godot/imported/lance.svg-a39e4d715507d9158a02ef6c289124aa.ctex"]
+source_file="res://assets/icons/leech.png"
+dest_files=["res://.godot/imported/leech.png-79b6d2bd10c1bff3fbdbf24df0e89803.ctex"]
 
 [params]
 
@@ -38,6 +38,3 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
-svg/scale=0.25
-editor/scale_with_editor_scale=false
-editor/convert_colors_with_editor_theme=false
