@@ -71,6 +71,14 @@ func _test_art_catalog() -> void:
 	for type in enemies:
 		var texture := GameArt.enemy_icon(type)
 		_expect(texture != null and texture.get_size().x > 0, "Enemy %s must load its icon" % type)
+		var atlas := GameArt.enemy_walk_atlas(type)
+		_expect(atlas != null, "Enemy %s must load its walk atlas" % type)
+		if type != &"crawler":
+			_expect(atlas.get_size() == Vector2(1536, 1024), "Enemy %s walk atlas must use the 6x4 frame grid" % type)
+		for direction in [Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT, Vector2.UP]:
+			for frame in range(GameArt.ENEMY_WALK_FRAME_COUNT):
+				var region := GameArt.enemy_walk_region(type, direction, frame)
+				_expect(Rect2(Vector2.ZERO, atlas.get_size()).encloses(region), "Enemy %s frame must stay within its atlas" % type)
 	_expect(GameArt.CRAWLER_WALK_ATLAS.get_size() == Vector2(1254, 1254), "Crawler walk atlas must load at its source dimensions")
 	for direction in [Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT, Vector2.UP]:
 		for frame in range(GameArt.CRAWLER_WALK_FRAME_COUNT):
@@ -81,6 +89,11 @@ func _test_art_catalog() -> void:
 	_expect(GameArt.crawler_walk_region(Vector2.RIGHT, 0).position.y == 632.0, "Crawler right frames must use the right-facing row")
 	_expect(GameArt.crawler_walk_region(Vector2.UP, 0).position.y == 922.0, "Crawler up frames must use the rear-facing row")
 	_expect(GameArt.crawler_walk_frame(0.25) == 2, "Crawler walk frames must advance with distance traveled")
+	_expect(GameArt.enemy_walk_region(&"skitter", Vector2.DOWN, 0).position == Vector2.ZERO, "Enemy down frames must use row zero")
+	_expect(GameArt.enemy_walk_region(&"skitter", Vector2.LEFT, 0).position.y == 256.0, "Enemy left frames must use row one")
+	_expect(GameArt.enemy_walk_region(&"skitter", Vector2.RIGHT, 0).position.y == 512.0, "Enemy right frames must use row two")
+	_expect(GameArt.enemy_walk_region(&"skitter", Vector2.UP, 0).position.y == 768.0, "Enemy up frames must use row three")
+	_expect(GameArt.enemy_walk_region(&"skitter", Vector2.DOWN, 5).position.x == 1280.0, "Enemy frame columns must advance by 256 pixels")
 
 func _test_crawler_animation() -> void:
 	var board := GameBoard.new()
@@ -90,7 +103,7 @@ func _test_crawler_animation() -> void:
 	_expect(board._enemy_direction(enemy) == Vector2.RIGHT, "Crawler must face along its current path segment")
 	board._advance_enemy(enemy, 0.25)
 	_expect(is_equal_approx(float(enemy["walk_distance"]), 0.25), "Crawler animation distance must follow movement")
-	_expect(GameArt.crawler_walk_frame(float(enemy["walk_distance"])) == 2, "Crawler movement must select the matching walk frame")
+	_expect(GameArt.enemy_walk_frame(float(enemy["walk_distance"])) == 2, "Enemy movement must select the matching walk frame")
 	enemy["segment"] = 4
 	enemy["segment_t"] = 0.0
 	_expect(board._enemy_direction(enemy) == Vector2.DOWN, "Crawler must turn when its path turns")

@@ -1058,17 +1058,18 @@ func _draw_enemies() -> void:
 		var definition: Dictionary = GameData.enemy_definitions()[enemy["type"]]
 		var radius := 22.0 if enemy["type"] == &"severer" else (17.0 if enemy["type"] == &"crawler" else (14.0 if enemy["type"] == &"husk" else 10.0))
 		draw_circle(pos, radius + 4, Color(0, 0, 0, 0.45))
-		if enemy["type"] == &"crawler":
-			var frame := GameArt.crawler_walk_frame(float(enemy.get("walk_distance", 0.0)))
-			var source := GameArt.crawler_walk_region(_enemy_direction(enemy), frame)
-			draw_texture_rect_region(GameArt.CRAWLER_WALK_ATLAS, Rect2(pos - Vector2(22, 22), Vector2(44, 44)), source)
-		else:
-			var icon_size := 48.0 if enemy["type"] == &"severer" else (32.0 if enemy["type"] == &"husk" else 26.0)
-			var icon := GameArt.enemy_icon(enemy["type"])
-			var icon_color: Color = definition["color"]
-			if enemy["type"] == &"phase":
-				icon_color.a = 0.76
-			draw_texture_rect(icon, Rect2(pos - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false, icon_color)
+		var icon_size := 48.0 if enemy["type"] == &"severer" else (44.0 if enemy["type"] == &"crawler" else (32.0 if enemy["type"] == &"husk" else 26.0))
+		var frame := GameArt.enemy_walk_frame(float(enemy.get("walk_distance", 0.0)))
+		var source := GameArt.enemy_walk_region(enemy["type"], _enemy_direction(enemy), frame)
+		var icon_color: Color = Color.WHITE if enemy["type"] == &"crawler" else definition["color"]
+		if enemy["type"] == &"phase":
+			icon_color.a = 0.76
+		draw_texture_rect_region(
+			GameArt.enemy_walk_atlas(enemy["type"]),
+			Rect2(pos - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size),
+			source,
+			icon_color
+		)
 		if enemy["type"] == &"phase": draw_arc(pos, radius + 5, 0, TAU, 18, Color("6fdcff"), 2)
 		if objective_status == &"active" and int(enemy["id"]) == objective_enemy_id:
 			draw_arc(pos, radius + 9, 0, TAU, 24, Color("fff27a"), 3)
