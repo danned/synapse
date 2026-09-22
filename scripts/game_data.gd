@@ -9,6 +9,27 @@ const STARTING_INTEGRITY := 20
 const MAX_WAVES := 10
 const SPECIALIZATION_WAVES := 3
 const SPECIALIZATION_COST := 40
+const RUN_MUTATOR_IDS := ["heavy_pulses", "lean_start", "skitter_surge", "fragile_core", "armored_signals", "costly_construction", "short_links", "limited_core_ports", "narrow_conduits"]
+
+static func run_mutator_definitions() -> Dictionary:
+	return {
+		"heavy_pulses": {"name": "Heavy Pulses", "description": "Pulses launch 50% slower; tower and link damage +50%."},
+		"lean_start": {"name": "Lean Start", "description": "Start with 60 less charge; gain 20 extra charge after each wave."},
+		"skitter_surge": {"name": "Skitter Surge", "description": "Skitter is three times as likely in generated waves from wave 2."},
+		"fragile_core": {"name": "Fragile Core", "description": "Start with 6 less core integrity."},
+		"armored_signals": {"name": "Armored Signals", "description": "All enemies have 25% more health."},
+		"costly_construction": {"name": "Costly Construction", "description": "Tower costs rise 20%, rounded up; recycling uses the higher cost."},
+		"short_links": {"name": "Short Links", "description": "All links reach 0.75 fewer cells."},
+		"limited_core_ports": {"name": "Limited Core Ports", "description": "The Core starts with one child port instead of two."},
+		"narrow_conduits": {"name": "Narrow Conduits", "description": "Link hit width is reduced by 25%."}
+	}
+
+static func normalize_run_mutators(raw_ids: Array) -> Array[String]:
+	var selected: Array[String] = []
+	for id in RUN_MUTATOR_IDS:
+		if id in raw_ids:
+			selected.append(id)
+	return selected
 
 const TOWER_ORDER := [&"relay", &"arc", &"cryo", &"lance", &"mortar", &"rift"]
 const BASE_CARD_IDS := [

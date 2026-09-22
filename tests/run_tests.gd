@@ -19,6 +19,8 @@ func _run_tests() -> void:
 	_test_permanent_perks()
 	_test_gene_lab_ui()
 	_test_wave_determinism()
+	_test_run_mutators()
+	_test_mutator_ui()
 	_test_wave_fuzzing()
 	_test_level_layouts()
 	_test_campaign_waves()
@@ -245,6 +247,67 @@ func _test_wave_determinism() -> void:
 	for entry in RunGenerator.generate_run(424242, 5)[9]["entries"]:
 		if entry["type"] == &"severer": boss_found = true
 	_expect(boss_found, "Final level wave ten must contain the Severer")
+
+func _test_run_mutators() -> void:
+	_expect(GameData.RUN_MUTATOR_IDS.size() == 9, "Nine run mutators must be available")
+	_expect(GameData.normalize_run_mutators(["short_links", "unknown", "heavy_pulses", "short_links"]) == ["heavy_pulses", "short_links"], "Mutators normalize to valid unique catalog order")
+	var base := RunGenerator.generate_run(123, 1)
+	_expect(base == RunGenerator.generate_run(123, 1, []), "No mutators preserve seeded wave generation")
+	var surged := RunGenerator.generate_run(123, 1, ["skitter_surge"])
+	_expect(surged == RunGenerator.generate_run(123, 1, ["skitter_surge"]), "Skitter Surge remains deterministic")
+	_expect(surged[0] == base[0], "Skitter Surge leaves wave one unchanged")
+	var base_skitters := 0
+	var surge_skitters := 0
+	for seed_value in range(1, 51):
+		for entry in RunGenerator.generate_wave(seed_value, 5, 1)["entries"]:
+			if entry["type"] == &"skitter": base_skitters += 1
+		for entry in RunGenerator.generate_wave(seed_value, 5, 1, false, ["skitter_surge"])["entries"]:
+			if entry["type"] == &"skitter": surge_skitters += 1
+	_expect(surge_skitters > base_skitters, "Skitter Surge raises fast enemy frequency across fixed seeds")
+	var board := GameBoard.new()
+	board.configure(42, "normal", 1, {"reserve_cells": 2, "core_lattice": 1, "wave_metabolism": 1}, GameData.RUN_MUTATOR_IDS)
+	_expect(board.charge == 180 and board.integrity == 15, "Resource mutators compose with permanent perks")
+	_expect(is_equal_approx(float(board.graph.modifiers["core_interval_mult"]), 1.5), "Heavy Pulses slow the Core interval")
+	_expect(is_equal_approx(board.graph.link_reach(&"relay"), 3.25), "Short Links reduce reach")
+	_expect(board.graph.child_capacity(0) == 1, "Limited Core Ports leaves one initial port")
+	_expect(is_equal_approx(float(board.graph.modifiers["link_width_mult"]), 0.75), "Narrow Conduits reduce link width")
+	_expect(board.tower_cost(&"relay") == 48 and board.tower_cost(&"arc") == 96, "Costly Construction raises displayed and charged costs")
+	board.graph.apply_modifier("parallel_roots")
+	board.graph.apply_modifier("core_metronome")
+	_expect(board.graph.child_capacity(0) == 2 and is_equal_approx(float(board.graph.modifiers["core_interval_mult"]), 1.35), "Draft modifiers compose with run constraints")
+	board._spawn_enemy(&"crawler", 0)
+	_expect(is_equal_approx(float(board.enemies[0]["hp"]), 42.5), "Armored Signals raise enemy health")
+	board._damage_enemy(0, 10.0, true)
+	_expect(is_equal_approx(float(board.enemies[0]["hp"]), 27.5), "Heavy Pulses raise damage")
+	board.enemies.clear()
+	var relay := board.graph.place_node(&"relay", Vector2i(13, 3), 0)
+	board.sell_node(relay)
+	_expect(board.charge == 216, "Recycling uses adjusted construction cost")
+	board.current_wave = 1
+	board._finish_delay = 0.1
+	board._check_wave_complete(0.2)
+	_expect(board.charge == 279, "Lean Start adds twenty to wave payout")
+	board.free()
+
+func _test_mutator_ui() -> void:
+	var menu: Variant = load("res://scripts/main.gd").new()
+	menu.save_data = SaveService.defaults()
+	menu.sound_manager = SoundManager.new()
+	menu.sound_manager.current_music = &"ambient"
+	menu.add_child(menu.sound_manager)
+	var loadout: Array[StringName] = [&"relay", &"arc", &"cryo"]
+	var mutators: Array[String] = ["short_links", "heavy_pulses"]
+	menu._show_mutator_select(1, "normal", 123, loadout, mutators)
+	var selected_count := 0
+	for button in menu.find_children("*", "Button", true, false):
+		if button.button_pressed: selected_count += 1
+	_expect(selected_count == 2, "Replay restores selected mutator toggles")
+	menu._show_results(4, false, "normal", 123, 0, mutators)
+	var result_text := ""
+	for label in menu.find_children("*", "Label", true, false):
+		result_text += label.text
+	_expect("SEED  123" in result_text and "Heavy Pulses" in result_text and "Short Links" in result_text, "Results show seed and active mutators")
+	menu.free()
 
 func _test_wave_fuzzing() -> void:
 	for seed_value in range(1, 1001):
@@ -599,10 +662,13 @@ func _test_specialization_ui() -> void:
 
 func _test_controller_setup() -> void:
 	var controller := GameController.new()
-	controller.setup("endless", 42, GameData.BASE_CARD_IDS, false, 3, [&"relay", &"mortar", &"rift"])
+	controller.setup("endless", 42, GameData.BASE_CARD_IDS, false, 3, [&"relay", &"mortar", &"rift"], {}, ["costly_construction", "short_links", "skitter_surge"])
 	_expect(controller.tower_buttons.size() == 3, "Build bar must show exactly three selected tower types")
+	_expect("48" in controller.tower_buttons[&"relay"].text, "Build bar must show mutator-adjusted costs")
+	_expect("MUTATORS 3" in controller.mode_label.text and "Short Links" in controller.mode_label.tooltip_text, "HUD exposes active mutators and descriptions")
 	_expect(controller.board.top_path == LevelData.layout(3)["top_path"], "Controller must pass selected layout to board")
 	controller.next_wave_index = 10
 	controller._ensure_next_manifest()
 	_expect(controller.manifests.size() == 11 and int(controller.manifests[10]["wave"]) == 11, "Endless must generate the next wave on demand")
+	_expect(controller.manifests[10] == RunGenerator.generate_wave(42, 11, 3, true, controller.run_mutators), "Endless generation retains run mutators")
 	controller.free()

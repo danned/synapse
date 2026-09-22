@@ -29,6 +29,7 @@ var level := 1
 var wave_hp_scale := 1.0
 var wave_speed_scale := 1.0
 var permanent_perks: Dictionary = {}
+var run_mutators: Array[String] = []
 
 var selected_tower: StringName = &""
 var selected_node_id := -1
@@ -80,7 +81,7 @@ func _ready() -> void:
 	set_process(true)
 	queue_redraw()
 
-func configure(seed_value: int, difficulty_id: String, level_id: int = 1, perks: Dictionary = {}) -> void:
+func configure(seed_value: int, difficulty_id: String, level_id: int = 1, perks: Dictionary = {}, mutators: Array = []) -> void:
 	run_seed = seed_value
 	difficulty = difficulty_id
 	level = level_id
@@ -89,9 +90,14 @@ func configure(seed_value: int, difficulty_id: String, level_id: int = 1, perks:
 	bottom_path = layout["bottom_path"]
 	blocked_cells = layout["blocked_cells"]
 	permanent_perks = perks.duplicate(true)
-	charge = GameData.STARTING_CHARGE + 10 * _perk_level("reserve_cells")
-	integrity = GameData.STARTING_INTEGRITY + _perk_level("core_lattice")
+	run_mutators = GameData.normalize_run_mutators(mutators)
+	charge = GameData.STARTING_CHARGE + 10 * _perk_level("reserve_cells") - (60 if "lean_start" in run_mutators else 0)
+	integrity = GameData.STARTING_INTEGRITY + _perk_level("core_lattice") - (6 if "fragile_core" in run_mutators else 0)
 	graph = NetworkGraph.new()
+	if "heavy_pulses" in run_mutators: graph.modifiers["core_interval_mult"] *= 1.5
+	if "short_links" in run_mutators: graph.modifiers["link_range_bonus"] -= 0.75
+	if "limited_core_ports" in run_mutators: graph.modifiers["core_children_bonus"] -= 1
+	if "narrow_conduits" in run_mutators: graph.modifiers["link_width_mult"] *= 0.75
 	graph.changed.connect(_on_graph_changed)
 	rift_zones.clear()
 	charge_changed.emit(charge)
@@ -246,9 +252,8 @@ func sell_node(node_id: int) -> void:
 	var subtree: Array[int] = []
 	_collect_subtree_preview(node_id, subtree)
 	var refund := 0
-	var towers := GameData.tower_definitions()
 	for id in subtree:
-		refund += int(round(float(towers[graph.nodes[id]["type"]]["cost"]) * (0.75 + 0.03 * _perk_level("reclamation"))))
+		refund += int(round(float(tower_cost(graph.nodes[id]["type"])) * (0.75 + 0.03 * _perk_level("reclamation"))))
 	graph.remove_subtree(node_id)
 	charge += refund
 	selected_node_id = -1
@@ -276,6 +281,10 @@ func _collect_subtree_preview(node_id: int, output: Array[int]) -> void:
 	output.append(node_id)
 	for child_id in graph.nodes[node_id]["children"]:
 		_collect_subtree_preview(child_id, output)
+
+func tower_cost(tower_type: StringName) -> int:
+	var base_cost := int(GameData.tower_definitions()[tower_type]["cost"])
+	return ceili(base_cost * 1.2) if "costly_construction" in run_mutators else base_cost
 
 func apply_card(card_id: String) -> void:
 	graph.apply_modifier(card_id)
@@ -312,7 +321,7 @@ func _spawn_ready_enemies() -> void:
 
 func _spawn_enemy(type: StringName, lane: int, segment: int = 0, segment_t: float = 0.0, hp_fraction: float = 1.0, reward_override: int = -1) -> void:
 	var definition: Dictionary = GameData.enemy_definitions()[type]
-	var health := float(definition["hp"]) * wave_hp_scale * hp_fraction
+	var health := float(definition["hp"]) * wave_hp_scale * hp_fraction * (1.25 if "armored_signals" in run_mutators else 1.0)
 	var enemy := {
 		"id": next_enemy_id, "type": type, "lane": lane,
 		"segment": segment, "segment_t": segment_t, "position": _cell_center(_path_for_lane(lane)[0]),
@@ -599,7 +608,7 @@ func _damage_enemy(index: int, raw_amount: float, from_link: bool, ignore_armor:
 	if index < 0 or index >= enemies.size():
 		return
 	var enemy: Dictionary = enemies[index]
-	var amount := raw_amount
+	var amount := raw_amount * (1.5 if "heavy_pulses" in run_mutators else 1.0)
 	if enemy["type"] == &"husk" and not from_link and not ignore_armor:
 		amount *= 0.55
 	if enemy["type"] == &"phase" and from_link:
@@ -670,7 +679,7 @@ func _check_wave_complete(delta: float) -> void:
 		pulses.clear()
 		graph.complete_wave(current_wave)
 		specialization_state_changed.emit()
-		charge += 35 + current_wave * 5 + 3 * _perk_level("wave_metabolism")
+		charge += 35 + current_wave * 5 + 3 * _perk_level("wave_metabolism") + (20 if "lean_start" in run_mutators else 0)
 		charge_changed.emit(charge)
 		wave_finished.emit()
 		sfx_requested.emit(&"wave_complete")
@@ -738,7 +747,7 @@ func _handle_cell_tap(cell: Vector2i) -> void:
 			sfx_requested.emit(&"error")
 			return
 		var definitions := GameData.tower_definitions()
-		var cost: int = definitions[selected_tower]["cost"]
+		var cost := tower_cost(selected_tower)
 		if charge < cost:
 			message_requested.emit("Insufficient charge")
 			sfx_requested.emit(&"error")

@@ -184,7 +184,7 @@ func _show_difficulty_select(level: int) -> void:
 		column.add_child(button)
 	_add_back_button(body, _show_level_map)
 
-func _show_loadout_select(level: int, difficulty_id: String, requested_seed: int) -> void:
+func _show_loadout_select(level: int, difficulty_id: String, requested_seed: int, replay_mutators: Array = []) -> void:
 	_clear_content()
 	var shell := _page_shell("CHOOSE THREE TURRETS", "Only your selected types can be built in this attempt.")
 	var body: VBoxContainer = shell["body"]
@@ -222,11 +222,43 @@ func _show_loadout_select(level: int, difficulty_id: String, requested_seed: int
 			enter.disabled = selected.size() != 3
 		)
 		grid.add_child(button)
-	enter.pressed.connect(func(): _start_new_run(level, difficulty_id, requested_seed, selected))
+	enter.text = "CHOOSE MUTATORS"
+	enter.pressed.connect(func(): _show_mutator_select(level, difficulty_id, requested_seed, selected, replay_mutators))
 	body.add_child(enter)
 	_add_back_button(body, _show_difficulty_select.bind(level))
 
-func _start_new_run(level: int, difficulty_id: String, requested_seed: int, loadout: Array[StringName]) -> void:
+func _show_mutator_select(level: int, difficulty_id: String, requested_seed: int, loadout: Array[StringName], replay_mutators: Array = []) -> void:
+	_clear_content()
+	var shell := _page_shell("RUN MUTATORS", "Choose any combination. These rules last for this run.")
+	var body: VBoxContainer = shell["body"]
+	var selected := GameData.normalize_run_mutators(replay_mutators)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_child(grid)
+	var definitions := GameData.run_mutator_definitions()
+	for id in GameData.RUN_MUTATOR_IDS:
+		var definition: Dictionary = definitions[id]
+		var button := Button.new()
+		button.toggle_mode = true
+		button.button_pressed = id in selected
+		button.custom_minimum_size = Vector2(330, 115)
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.text = "%s\n%s" % [definition["name"].to_upper(), definition["description"]]
+		button.toggled.connect(func(pressed: bool, mutator_id: String = id):
+			if pressed:
+				selected.append(mutator_id)
+			else:
+				selected.erase(mutator_id)
+		)
+		grid.add_child(button)
+	var enter := _menu_button("ENTER LEVEL", Color("62f4d2"))
+	enter.pressed.connect(func(): _start_new_run(level, difficulty_id, requested_seed, loadout, selected))
+	body.add_child(enter)
+	_add_back_button(body, _show_loadout_select.bind(level, difficulty_id, requested_seed, replay_mutators))
+
+func _start_new_run(level: int, difficulty_id: String, requested_seed: int, loadout: Array[StringName], mutators: Array = []) -> void:
 	if not SaveService.level_unlocked(save_data, level) or (difficulty_id == "endless" and not SaveService.endless_unlocked(save_data, level)):
 		return
 	if not SaveService.valid_loadout(save_data, loadout): return
@@ -245,14 +277,14 @@ func _start_new_run(level: int, difficulty_id: String, requested_seed: int, load
 	game.exit_requested.connect(_show_level_map)
 	game.run_ended.connect(_on_run_ended)
 	game.tutorial_completed.connect(_on_tutorial_completed)
-	game.setup(difficulty_id, seed_to_use, save_data["deck"], not bool(save_data["tutorial_seen"]), level, loadout, save_data.get("perks", {}))
+	game.setup(difficulty_id, seed_to_use, save_data["deck"], not bool(save_data["tutorial_seen"]), level, loadout, save_data.get("perks", {}), mutators)
 	sound_manager.play_music(&"ambient")
 
 func _on_tutorial_completed() -> void:
 	save_data["tutorial_seen"] = true
 	SaveService.save_data(save_data)
 
-func _on_run_ended(wave_reached: int, victory: bool, difficulty_id: String, seed_value: int) -> void:
+func _on_run_ended(wave_reached: int, victory: bool, difficulty_id: String, seed_value: int, mutators: Array[String]) -> void:
 	var reward := 0
 	if victory: reward = 3
 	elif difficulty_id == "endless" and wave_reached >= 10: reward = 3
@@ -264,9 +296,9 @@ func _on_run_ended(wave_reached: int, victory: bool, difficulty_id: String, seed
 	if save_data["best_wave"].has(difficulty_id):
 		save_data["best_wave"][difficulty_id] = maxi(int(save_data["best_wave"][difficulty_id]), wave_reached)
 	SaveService.save_data(save_data)
-	_show_results(wave_reached, victory, difficulty_id, seed_value, reward)
+	_show_results(wave_reached, victory, difficulty_id, seed_value, reward, mutators)
 
-func _show_results(wave_reached: int, victory: bool, difficulty_id: String, seed_value: int, reward: int) -> void:
+func _show_results(wave_reached: int, victory: bool, difficulty_id: String, seed_value: int, reward: int, mutators: Array[String] = []) -> void:
 	sound_manager.play_music(&"ambient")
 	if victory:
 		sound_manager.play_sfx(&"victory")
@@ -274,14 +306,19 @@ func _show_results(wave_reached: int, victory: bool, difficulty_id: String, seed
 	var shell := _page_shell("CORE STABLE" if victory else "CORE COLLAPSED", "The network survived." if victory else "The pattern failed. Rebuild the geometry.")
 	var body: VBoxContainer = shell["body"]
 	var summary := Label.new()
-	summary.text = "LEVEL  %d\n%s  %d%s\nMODE  %s\nSEED  %d\n\nGENE SHARDS  +%d" % [active_level, "WAVES SURVIVED" if difficulty_id == "endless" else "WAVE", maxi(0, wave_reached - 1) if difficulty_id == "endless" else wave_reached, "" if difficulty_id == "endless" else " / 10", "ENDLESS" if difficulty_id == "endless" else GameData.difficulty_name(difficulty_id), seed_value, reward]
+	var names: Array[String] = []
+	var definitions := GameData.run_mutator_definitions()
+	for id in GameData.normalize_run_mutators(mutators):
+		names.append(definitions[id]["name"])
+	summary.text = "LEVEL  %d\n%s  %d%s\nMODE  %s\nSEED  %d\nMUTATORS  %s\n\nGENE SHARDS  +%d" % [active_level, "WAVES SURVIVED" if difficulty_id == "endless" else "WAVE", maxi(0, wave_reached - 1) if difficulty_id == "endless" else wave_reached, "" if difficulty_id == "endless" else " / 10", "ENDLESS" if difficulty_id == "endless" else GameData.difficulty_name(difficulty_id), seed_value, ", ".join(names) if not names.is_empty() else "None", reward]
+	summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	summary.add_theme_font_size_override("font_size", 25)
 	summary.add_theme_color_override("font_color", Color("62f4d2") if victory else Color("ff6b91"))
 	body.add_child(summary)
 	body.add_child(_vertical_gap(20))
 	var replay := _menu_button("REPLAY THIS SEED", Color("9c82ff"))
-	replay.pressed.connect(_show_loadout_select.bind(active_level, difficulty_id, seed_value))
+	replay.pressed.connect(_show_loadout_select.bind(active_level, difficulty_id, seed_value, mutators))
 	body.add_child(replay)
 	var fresh := _menu_button("NEW RUN", Color("62f4d2"))
 	fresh.pressed.connect(_show_level_map)
@@ -507,7 +544,7 @@ func _show_how_to_play() -> void:
 	var shell := _page_shell("HOW TO ROUTE POWER", "Placement controls both link effects and tower attacks.")
 	var body: VBoxContainer = shell["body"]
 	var guide := Label.new()
-	guide.text = "CAMPAIGN\nChoose a level on the signal map, select a difficulty, then bring three turret types. Clearing a level opens the next route and Endless for the route you cleared.\n\nBUILD\nChoose a tower, tap an empty cell to preview its nearest valid parent, then tap again to confirm. Connections cannot pass through dark scar tissue unless Phase Axon is active. Select a node to rewire or recycle its whole branch.\n\nPULSES\nThe Core sends pulses down every root branch. A destination tower defines the inbound link effect, then fires when the pulse arrives. Relays rotate between child branches, so coverage trades against cadence.\n\nCOUNTERS\nHusks resist turrets, Phase Mites resist links, Splitters release crawlers, and Conductors speed nearby enemies. Shielders pulse short shields to allies within their blue ring. Leeches and the Severer disable crossed links.\n\nDRAFTS & GENES\nAfter every second wave, choose a mutation from your eight-card deck. Drafted cards last for this run. The Gene Lab unlocks more card choices and permanent perks that apply to every run."
+	guide.text = "CAMPAIGN\nChoose a level on the signal map, select a difficulty, then bring three turret types. Clearing a level opens the next route and Endless for the route you cleared.\n\nRUN MUTATORS\nChoose any combination after your loadout. Their rules last for one run, stack with difficulty and perks, and appear beside the seed on results. Tap the HUD mutator label to review them. Replay This Seed keeps the selection.\n\nBUILD\nChoose a tower, tap an empty cell to preview its nearest valid parent, then tap again to confirm. Connections cannot pass through dark scar tissue unless Phase Axon is active. Select a node to rewire or recycle its whole branch.\n\nPULSES\nThe Core sends pulses down every root branch. A destination tower defines the inbound link effect, then fires when the pulse arrives. Relays rotate between child branches, so coverage trades against cadence.\n\nCOUNTERS\nHusks resist turrets, Phase Mites resist links, Splitters release crawlers, and Conductors speed nearby enemies. Shielders pulse short shields to allies within their blue ring. Leeches and the Severer disable crossed links.\n\nDRAFTS & GENES\nAfter every second wave, choose a mutation from your eight-card deck. Drafted cards last for this run. The Gene Lab unlocks more card choices and permanent perks that apply to every run."
 	guide.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	guide.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	guide.add_theme_font_size_override("font_size", 18)

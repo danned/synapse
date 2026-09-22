@@ -3,10 +3,10 @@ extends RefCounted
 
 const WAVE_BUDGETS := [10.0, 14.0, 19.0, 25.0, 32.0, 40.0, 49.0, 59.0, 70.0, 82.0]
 
-static func generate_run(seed_value: int, level: int = 1) -> Array[Dictionary]:
+static func generate_run(seed_value: int, level: int = 1, mutators: Array = []) -> Array[Dictionary]:
 	var waves: Array[Dictionary] = []
 	for wave_number in range(1, GameData.MAX_WAVES + 1):
-		waves.append(generate_wave(seed_value, wave_number, level))
+		waves.append(generate_wave(seed_value, wave_number, level, false, mutators))
 	return waves
 
 static func available_types(level: int, wave_number: int) -> Array[StringName]:
@@ -20,7 +20,7 @@ static func available_types(level: int, wave_number: int) -> Array[StringName]:
 	if level >= 5 and wave_number >= 3: available.append(&"conductor")
 	return available
 
-static func generate_wave(seed_value: int, wave_number: int, level: int = 1, endless: bool = false) -> Dictionary:
+static func generate_wave(seed_value: int, wave_number: int, level: int = 1, endless: bool = false, mutators: Array = []) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value * 7919 + wave_number * 104729 + level * 65537
 	var definitions := GameData.enemy_definitions()
@@ -50,6 +50,8 @@ static func generate_wave(seed_value: int, wave_number: int, level: int = 1, end
 				candidates.append(type)
 		if candidates.is_empty():
 			break
+		if "skitter_surge" in mutators and &"skitter" in candidates:
+			candidates.append_array([&"skitter", &"skitter"])
 		var type := candidates[rng.randi_range(0, candidates.size() - 1)]
 		if type == &"leech" and _count_type(entries, &"leech") >= maxi(1, int(entries.size() * 0.3)):
 			type = &"crawler"

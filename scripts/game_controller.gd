@@ -2,7 +2,7 @@ class_name GameController
 extends Control
 
 signal exit_requested
-signal run_ended(wave_reached: int, victory: bool, difficulty: String, seed_value: int)
+signal run_ended(wave_reached: int, victory: bool, difficulty: String, seed_value: int, mutators: Array[String])
 signal tutorial_completed
 
 var difficulty := "normal"
@@ -13,6 +13,7 @@ var deck: Array[String] = []
 var manifests: Array[Dictionary] = []
 var next_wave_index := 0
 var drafted_cards: Array[String] = []
+var run_mutators: Array[String] = []
 
 var board: GameBoard
 var charge_label: Label
@@ -41,7 +42,7 @@ var _exit_confirmation: Control
 var _specialization_overlay: Control
 var sound_manager: SoundManager
 
-func setup(p_difficulty: String, p_seed: int, p_deck: Array, show_tutorial: bool, p_level: int = 1, p_loadout: Array = [], perks: Dictionary = {}) -> void:
+func setup(p_difficulty: String, p_seed: int, p_deck: Array, show_tutorial: bool, p_level: int = 1, p_loadout: Array = [], perks: Dictionary = {}, mutators: Array = []) -> void:
 	difficulty = p_difficulty
 	level = p_level
 	loadout.clear()
@@ -50,11 +51,12 @@ func setup(p_difficulty: String, p_seed: int, p_deck: Array, show_tutorial: bool
 	if loadout.is_empty():
 		loadout = [&"relay", &"arc", &"cryo"]
 	seed_value = p_seed
+	run_mutators = GameData.normalize_run_mutators(mutators)
 	for card_id in p_deck:
 		deck.append(str(card_id))
-	manifests = RunGenerator.generate_run(seed_value, level)
+	manifests = RunGenerator.generate_run(seed_value, level, run_mutators)
 	_build_ui()
-	board.configure(seed_value, difficulty, level, perks)
+	board.configure(seed_value, difficulty, level, perks, run_mutators)
 	_update_coverage_readout()
 	_update_wave_preview()
 	_update_build_policy()
@@ -73,6 +75,28 @@ func _build_ui() -> void:
 	integrity_label = _hud_label("CORE 20", Color("ff6b91"), 145)
 	wave_label = _hud_label("WAVE 0 / ∞" if difficulty == "endless" else "WAVE 0 / 10", Color("d8edff"), 175)
 	mode_label = _hud_label("L%d  %s" % [level, "ENDLESS" if difficulty == "endless" else GameData.difficulty_name(difficulty)], Color("9c82ff"), 260)
+	var mutator_names: Array[String] = []
+	var mutator_details: Array[String] = []
+	var definitions := GameData.run_mutator_definitions()
+	for id in run_mutators:
+		mutator_names.append(definitions[id]["name"])
+		mutator_details.append("%s: %s" % [definitions[id]["name"], definitions[id]["description"]])
+	if not mutator_names.is_empty():
+		mode_label.text += "\nMUTATORS %d • TAP TO VIEW" % mutator_names.size()
+		mode_label.tooltip_text = "\n".join(mutator_details)
+		mode_label.add_theme_font_size_override("font_size", 14)
+		mode_label.mouse_filter = Control.MOUSE_FILTER_STOP
+		mode_label.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		mode_label.gui_input.connect(func(event: InputEvent):
+			if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed or event is InputEventScreenTouch and event.pressed:
+				var dialog := AcceptDialog.new()
+				dialog.title = "ACTIVE RUN MUTATORS"
+				dialog.dialog_text = "\n\n".join(mutator_details)
+				add_child(dialog)
+				dialog.confirmed.connect(dialog.queue_free)
+				dialog.close_requested.connect(dialog.queue_free)
+				dialog.popup_centered(Vector2i(640, 400))
+		)
 	top_row.add_child(charge_label)
 	top_row.add_child(integrity_label)
 	top_row.add_child(wave_label)
@@ -129,6 +153,7 @@ func _build_ui() -> void:
 	intel_column.add_child(legend)
 
 	board = GameBoard.new()
+	board.run_mutators = run_mutators.duplicate()
 	board.position = Vector2(144, 80)
 	board.size = Vector2(1024, 512)
 	add_child(board)
@@ -151,7 +176,7 @@ func _build_ui() -> void:
 	for type in loadout:
 		var definition: Dictionary = GameData.tower_definitions()[type]
 		var button := Button.new()
-		button.text = "%s  •  %d\n%s" % [definition["name"], definition["cost"], str(definition["tagline"]).to_upper()]
+		button.text = "%s  •  %d\n%s" % [definition["name"], board.tower_cost(type), str(definition["tagline"]).to_upper()]
 		button.icon = GameArt.tower_icon(type)
 		button.add_theme_constant_override("icon_max_width", 32)
 		button.expand_icon = true
@@ -520,7 +545,7 @@ func _finish_run(victory: bool, wave_reached: int = -1) -> void:
 	_refresh_specialization_ui()
 	board.set_process(false)
 	var reached := GameData.MAX_WAVES if victory else (wave_reached if wave_reached >= 0 else next_wave_index)
-	run_ended.emit(reached, victory, difficulty, seed_value)
+	run_ended.emit(reached, victory, difficulty, seed_value, run_mutators)
 
 func _update_build_policy() -> void:
 	var allowed := is_build_allowed(difficulty, board.wave_active)
@@ -536,7 +561,7 @@ static func is_build_allowed(difficulty_id: String, wave_active: bool) -> bool:
 
 func _ensure_next_manifest() -> void:
 	if difficulty == "endless" and next_wave_index >= manifests.size():
-		manifests.append(RunGenerator.generate_wave(seed_value, next_wave_index + 1, level, true))
+		manifests.append(RunGenerator.generate_wave(seed_value, next_wave_index + 1, level, true, run_mutators))
 
 func _update_wave_preview() -> void:
 	_ensure_next_manifest()
