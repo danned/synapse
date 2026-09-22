@@ -1,6 +1,5 @@
 FROM node:22-bookworm-slim
 
-ARG CODEX_VERSION=0.147.0
 ARG GODOT_VERSION=4.7.2
 ARG GODOT_LINUX_SHA256=cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4
 ARG GODOT_TEMPLATES_SHA256=f298490b8d44d934be425a5a65a51bf15f422428b229a06a6e11d9ffea248011
@@ -33,9 +32,6 @@ RUN apt-get update \
 		unzip \
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN npm install --global "@openai/codex@${CODEX_VERSION}" \
-	&& npm cache clean --force
-
 RUN godot_archive="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip" \
 	&& curl --fail --location --retry 3 \
 		"https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/${godot_archive}" \
@@ -56,6 +52,11 @@ RUN templates_archive="Godot_v${GODOT_VERSION}-stable_export_templates.tpz" \
 	&& mv /tmp/godot-templates/templates/* "/opt/godot/export_templates/${GODOT_VERSION}.stable/" \
 	&& rm -rf "/tmp/${templates_archive}" /tmp/godot-templates
 
+ARG CODEX_VERSION=0.155.1
+
+RUN npm install --global "@openai/codex@${CODEX_VERSION}" \
+	&& npm cache clean --force
+
 RUN groupmod --gid "${SANDBOX_GID}" --new-name sandbox node \
 	&& usermod --uid "${SANDBOX_UID}" --gid "${SANDBOX_GID}" \
 		--login sandbox --home /home/sandbox --move-home --shell /bin/bash node \
@@ -66,10 +67,14 @@ RUN groupmod --gid "${SANDBOX_GID}" --new-name sandbox node \
 		"/home/sandbox/.local/share/godot/export_templates/${GODOT_VERSION}.stable" \
 	&& chown -R sandbox:sandbox /home/sandbox
 
+COPY --chmod=0755 .sandbox/entrypoint.sh /usr/local/bin/sandbox-entrypoint
+COPY --chmod=0644 .sandbox/codex.config.toml /usr/local/share/synapse-sandbox-codex.config.toml
+
 ENV HOME=/home/sandbox \
 	GODOT_VERSION=${GODOT_VERSION}
 
 USER sandbox
 WORKDIR /workspace
 
+ENTRYPOINT ["sandbox-entrypoint"]
 CMD ["bash"]

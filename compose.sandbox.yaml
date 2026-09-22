@@ -7,7 +7,7 @@ services:
       context: .
       dockerfile: .sandbox/Dockerfile
       args:
-        CODEX_VERSION: ${CODEX_VERSION:-0.147.0}
+        CODEX_VERSION: ${CODEX_VERSION:-0.155.1}
         GODOT_VERSION: ${GODOT_VERSION:-4.7.2}
         SANDBOX_UID: ${SANDBOX_UID:-1000}
         SANDBOX_GID: ${SANDBOX_GID:-1000}
@@ -31,10 +31,6 @@ services:
         target: /home/sandbox/.codex/auth.json
         bind:
           create_host_path: false
-      - type: bind
-        source: ./.sandbox/codex.config.toml
-        target: /home/sandbox/.codex/config.toml
-        read_only: true
       - type: volume
         source: npm-cache
         target: /home/sandbox/.npm
