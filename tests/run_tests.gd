@@ -11,6 +11,7 @@ func _init() -> void:
 	_test_modifiers()
 	_test_wave_determinism()
 	_test_wave_fuzzing()
+	_test_build_policy()
 	_test_progression_defaults()
 	if failures.is_empty():
 		print("PASS: %d assertions" % assertions)
@@ -106,3 +107,9 @@ func _test_progression_defaults() -> void:
 	_expect(SaveService.owned_card_ids(data).size() == 8, "Advanced cards must begin locked")
 	data["owned_packs"].append("advanced_network_pack")
 	_expect(SaveService.owned_card_ids(data).size() == 12, "Advanced entitlement must unlock four cards")
+
+func _test_build_policy() -> void:
+	_expect(GameController.is_build_allowed("easy", true), "Easy mode must allow building during combat")
+	_expect(not GameController.is_build_allowed("normal", true), "Normal mode must lock building during combat")
+	_expect(GameController.is_build_allowed("hardcore", true), "Hardcore mode must allow building during combat")
+	_expect(GameController.is_build_allowed("normal", false), "Every mode must allow building between waves")

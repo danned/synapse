@@ -129,6 +129,6 @@ static func difficulty_name(id: String) -> String:
 
 static func difficulty_description(id: String) -> String:
 	match id:
-		"easy": return "Full wave intel. Pause combat to build and rewire."
+		"easy": return "Full wave intel. Build live or pause combat at any time."
 		"hardcore": return "Minimal intel. Waves auto-launch; build in real time."
 	return "Partial wave intel. Build only between waves."

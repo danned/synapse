@@ -234,7 +234,7 @@ func _toggle_tactical_pause() -> void:
 		return
 	board.set_combat_paused(not board.combat_paused)
 	pause_button.text = "RESUME" if board.combat_paused else "PAUSE"
-	_set_status("Tactical pause • construction enabled" if board.combat_paused else "Combat resumed")
+	_set_status("Tactical pause • combat frozen" if board.combat_paused else "Combat resumed • build live")
 	_update_build_policy()
 
 func _launch_next_wave() -> void:
@@ -286,17 +286,15 @@ func _finish_run(victory: bool, wave_reached: int = -1) -> void:
 	run_ended.emit(reached, victory, difficulty, seed_value)
 
 func _update_build_policy() -> void:
-	var allowed := true
-	if board.wave_active:
-		match difficulty:
-			"easy": allowed = board.combat_paused
-			"normal": allowed = false
-			"hardcore": allowed = true
+	var allowed := is_build_allowed(difficulty, board.wave_active)
 	board.set_build_allowed(allowed)
 	for type in tower_buttons:
 		tower_buttons[type].disabled = not allowed
 	rewire_button.disabled = not allowed or board.selected_node_id <= 0
 	sell_button.disabled = not allowed or board.selected_node_id <= 0
+
+static func is_build_allowed(difficulty_id: String, wave_active: bool) -> bool:
+	return not wave_active or difficulty_id != "normal"
 
 func _update_wave_preview() -> void:
 	if next_wave_index >= manifests.size():
