@@ -14,6 +14,11 @@ func _run_tests() -> void:
 	_test_modifiers()
 	_test_wave_determinism()
 	_test_wave_fuzzing()
+	_test_level_layouts()
+	_test_campaign_waves()
+	_test_endless_scaling()
+	_test_new_enemy_behaviors()
+	_test_controller_setup()
 	_test_build_policy()
 	_test_menu_exit_confirmation()
 	_test_progression_defaults()
@@ -32,8 +37,8 @@ func _expect(condition: bool, message: String) -> void:
 		failures.append(message)
 
 func _test_content_catalog() -> void:
-	_expect(GameData.tower_definitions().size() == 4, "Tower catalog must contain four nodes")
-	_expect(GameData.enemy_definitions().size() == 6, "Enemy catalog must contain five units and the boss")
+	_expect(GameData.tower_definitions().size() == 6, "Tower catalog must contain six nodes")
+	_expect(GameData.enemy_definitions().size() == 8, "Enemy catalog must contain seven units and the boss")
 	_expect(GameData.card_definitions().size() == 12, "Card catalog must contain eight base and four advanced cards")
 	_expect(GameData.BASE_CARD_IDS.size() == 8, "Starting deck must contain eight cards")
 
@@ -88,9 +93,9 @@ func _test_wave_determinism() -> void:
 	_expect(first != different, "Different seeds should change the run")
 	_expect(first.size() == 10, "A run must have ten waves")
 	var boss_found := false
-	for entry in first[9]["entries"]:
+	for entry in RunGenerator.generate_run(424242, 5)[9]["entries"]:
 		if entry["type"] == &"severer": boss_found = true
-	_expect(boss_found, "Wave ten must contain the Severer")
+	_expect(boss_found, "Final level wave ten must contain the Severer")
 
 func _test_wave_fuzzing() -> void:
 	for seed_value in range(1, 1001):
@@ -108,6 +113,27 @@ func _test_wave_fuzzing() -> void:
 func _test_progression_defaults() -> void:
 	var data := SaveService.defaults()
 	_expect(data["deck"].size() == 8, "Default deck must be playable")
+	_expect(SaveService.level_unlocked(data, 1), "Level one must start unlocked")
+	_expect(not SaveService.level_unlocked(data, 2), "Level two must start locked")
+	_expect(SaveService.unlocked_towers(data).size() == 4, "Four towers must be available at start")
+	_expect(SaveService.valid_loadout(data, [&"relay", &"arc", &"cryo"]), "Three unlocked unique towers must be valid")
+	_expect(not SaveService.valid_loadout(data, [&"relay", &"relay", &"arc"]), "Duplicate tower selection must fail")
+	_expect(not SaveService.valid_loadout(data, [&"relay", &"arc", &"mortar"]), "Locked tower selection must fail")
+	SaveService.complete_level(data, 2)
+	_expect(data["completed_levels"].is_empty(), "Cannot skip a locked level")
+	SaveService.complete_level(data, 1)
+	_expect(SaveService.level_unlocked(data, 2) and SaveService.endless_unlocked(data, 1), "Victory must unlock next level and its own Endless")
+	SaveService.complete_level(data, 2)
+	_expect(&"mortar" in SaveService.unlocked_towers(data), "Mortar must unlock after level two")
+	SaveService.complete_level(data, 3)
+	SaveService.complete_level(data, 4)
+	_expect(&"rift" in SaveService.unlocked_towers(data), "Rift must unlock after level four")
+	SaveService.record_wave(data, 1, 12, true)
+	SaveService.record_wave(data, 1, 8, true)
+	_expect(int(data["endless_best"][0]) == 12, "Best Endless wave must never decrease")
+	var migrated := SaveService.normalize_data({"version": 1, "gene_shards": 9, "deck": GameData.BASE_CARD_IDS.duplicate(), "owned_packs": ["base"]})
+	_expect(migrated["gene_shards"] == 9 and migrated["completed_levels"].is_empty(), "Old saves must keep resources and start campaign fresh")
+	_expect(migrated["campaign_best"].size() == 5, "Old saves must receive five campaign scores")
 	_expect(SaveService.owned_card_ids(data).size() == 8, "Advanced cards must begin locked")
 	data["owned_packs"].append("advanced_network_pack")
 	_expect(SaveService.owned_card_ids(data).size() == 12, "Advanced entitlement must unlock four cards")
@@ -117,6 +143,7 @@ func _test_build_policy() -> void:
 	_expect(not GameController.is_build_allowed("normal", true), "Normal mode must lock building during combat")
 	_expect(GameController.is_build_allowed("hardcore", true), "Hardcore mode must allow building during combat")
 	_expect(GameController.is_build_allowed("normal", false), "Every mode must allow building between waves")
+	_expect(not GameController.is_build_allowed("endless", true), "Endless must use Normal build timing")
 
 func _test_menu_exit_confirmation() -> void:
 	for difficulty_id in ["easy", "normal", "hardcore"]:
@@ -143,3 +170,90 @@ func _test_menu_exit_confirmation() -> void:
 		game._confirm_menu_exit()
 		_expect(exit_count[0] == 1, "%s confirm must request one exit" % difficulty_id)
 		game.queue_free()
+
+func _test_level_layouts() -> void:
+	var signatures: Array[String] = []
+	for level in range(1, LevelData.LEVEL_COUNT + 1):
+		var layout := LevelData.layout(level)
+		var blocked: Array[Vector2i] = layout["blocked_cells"]
+		var signature := ""
+		for lane in ["top_path", "bottom_path"]:
+			var path: Array[Vector2i] = layout[lane]
+			_expect(path[0].x == 0 and path[-1] == GameData.CORE_CELL, "Level %d lane must span spawn to Core" % level)
+			for index in range(path.size()):
+				var cell := path[index]
+				_expect(cell.x >= 0 and cell.x < 16 and cell.y >= 0 and cell.y < 8, "Level path cell must be in bounds")
+				_expect(cell not in blocked, "Blocked cell cannot overlap an enemy path")
+				if index > 0:
+					_expect(abs(cell.x - path[index - 1].x) + abs(cell.y - path[index - 1].y) == 1, "Path cells must be adjacent")
+			signature += str(path)
+		_expect(signature not in signatures, "Every level needs a different route")
+		signatures.append(signature)
+
+func _test_campaign_waves() -> void:
+	var previous_total := 0
+	for level in range(1, LevelData.LEVEL_COUNT + 1):
+		var wave := RunGenerator.generate_wave(2026, 1, level)
+		_expect(wave["entries"].size() > previous_total, "Opening waves must gain more enemies by level")
+		previous_total = wave["entries"].size()
+		for entry in RunGenerator.generate_wave(2026, 10, level)["entries"]:
+			_expect(entry["type"] != &"severer" or level == 5, "Boss must appear only in final campaign level")
+	_expect(&"splitter" in RunGenerator.available_types(3, 3), "Splitter must arrive in level three")
+	_expect(&"conductor" in RunGenerator.available_types(5, 3), "Conductor must arrive in level five")
+	_expect(&"husk" not in RunGenerator.available_types(1, 10), "Early level must not include later enemy types")
+
+func _test_endless_scaling() -> void:
+	var tenth := RunGenerator.generate_wave(42, 10, 1, true)
+	var twenty := RunGenerator.generate_wave(42, 20, 1, true)
+	var fifty := RunGenerator.generate_wave(42, 50, 1, true)
+	_expect(twenty == RunGenerator.generate_wave(42, 20, 1, true), "Endless waves must be deterministic")
+	_expect(float(tenth["hp_scale"]) < float(twenty["hp_scale"]) and float(twenty["hp_scale"]) < float(fifty["hp_scale"]), "Endless health must rise past wave ten")
+	_expect(twenty["entries"].size() <= 61 and fifty["entries"].size() <= 61, "Endless waves must cap spawn count")
+	_expect(not fifty["entries"].is_empty(), "Late Endless waves must remain playable")
+
+func _test_new_enemy_behaviors() -> void:
+	var board := GameBoard.new()
+	board.configure(42, "normal", 3)
+	board._spawn_enemy(&"splitter", 0, 2, 0.5)
+	board._damage_enemy(0, 1000.0, false)
+	_expect(board.enemies.size() == 2, "Splitter must release two enemies")
+	for child in board.enemies:
+		_expect(child["type"] == &"crawler" and int(child["segment"]) == 2, "Split children must continue along the same path")
+	board.free()
+	var boosted := GameBoard.new()
+	boosted.configure(42, "normal", 5)
+	boosted._spawn_enemy(&"conductor", 0)
+	boosted._spawn_enemy(&"crawler", 0)
+	boosted._update_enemies(1.0)
+	_expect(float(boosted.enemies[1]["segment_t"]) > 0.0 or int(boosted.enemies[1]["segment"]) > 0, "Conductor must let nearby crawlers move")
+	var boosted_progress := boosted._enemy_progress(boosted.enemies[1])
+	var normal := GameBoard.new()
+	normal.configure(42, "normal", 5)
+	normal._spawn_enemy(&"crawler", 0)
+	normal._update_enemies(1.0)
+	_expect(boosted_progress > normal._enemy_progress(normal.enemies[0]), "Conductor must speed nearby enemies")
+	boosted.free()
+	normal.free()
+	var towers := GameBoard.new()
+	towers.configure(42, "normal")
+	var mortar := towers.graph.place_node(&"mortar", Vector2i(13, 1), 0)
+	towers._spawn_enemy(&"crawler", 0)
+	towers._spawn_enemy(&"crawler", 0)
+	for enemy in towers.enemies:
+		enemy["position"] = Vector2(13.0, 2.0) * GameBoard.CELL_SIZE
+	towers._fire_mortar(mortar)
+	_expect(towers.enemies.size() == 2 and float(towers.enemies[0]["hp"]) < 34.0 and float(towers.enemies[1]["hp"]) < 34.0, "Mortar must damage a group")
+	var rift := towers.graph.place_node(&"rift", Vector2i(12, 1), mortar)
+	towers._fire_rift(rift)
+	_expect(not towers.rift_zones.is_empty(), "Rift must create a persistent field")
+	towers.free()
+
+func _test_controller_setup() -> void:
+	var controller := GameController.new()
+	controller.setup("endless", 42, GameData.BASE_CARD_IDS, false, 3, [&"relay", &"mortar", &"rift"])
+	_expect(controller.tower_buttons.size() == 3, "Build bar must show exactly three selected tower types")
+	_expect(controller.board.top_path == LevelData.layout(3)["top_path"], "Controller must pass selected layout to board")
+	controller.next_wave_index = 10
+	controller._ensure_next_manifest()
+	_expect(controller.manifests.size() == 11 and int(controller.manifests[10]["wave"]) == 11, "Endless must generate the next wave on demand")
+	controller.free()

@@ -18,6 +18,9 @@ var integrity := GameData.STARTING_INTEGRITY
 var current_wave := 0
 var difficulty := "normal"
 var run_seed := 0
+var level := 1
+var wave_hp_scale := 1.0
+var wave_speed_scale := 1.0
 
 var selected_tower: StringName = &""
 var selected_node_id := -1
@@ -32,6 +35,7 @@ var wave_active := false
 var enemies: Array[Dictionary] = []
 var pulses: Array[Dictionary] = []
 var effects: Array[Dictionary] = []
+var rift_zones: Array[Dictionary] = []
 var spawn_entries: Array[Dictionary] = []
 var spawn_index := 0
 var wave_time := 0.0
@@ -67,12 +71,18 @@ func _ready() -> void:
 	set_process(true)
 	queue_redraw()
 
-func configure(seed_value: int, difficulty_id: String) -> void:
+func configure(seed_value: int, difficulty_id: String, level_id: int = 1) -> void:
 	run_seed = seed_value
 	difficulty = difficulty_id
+	level = level_id
+	var layout := LevelData.layout(level)
+	top_path = layout["top_path"]
+	bottom_path = layout["bottom_path"]
+	blocked_cells = layout["blocked_cells"]
 	charge = GameData.STARTING_CHARGE
 	integrity = GameData.STARTING_INTEGRITY
 	graph = NetworkGraph.new()
+	rift_zones.clear()
 	charge_changed.emit(charge)
 	integrity_changed.emit(integrity)
 	queue_redraw()
@@ -104,6 +114,8 @@ func set_combat_paused(value: bool) -> void:
 
 func start_wave(manifest: Dictionary) -> void:
 	current_wave = int(manifest["wave"])
+	wave_hp_scale = float(manifest.get("hp_scale", 1.0))
+	wave_speed_scale = float(manifest.get("speed_scale", 1.0))
 	spawn_entries = manifest["entries"].duplicate(true)
 	spawn_index = 0
 	wave_time = 0.0
@@ -173,6 +185,7 @@ func _process(delta: float) -> void:
 			_emit_core_pulses()
 		_spawn_ready_enemies()
 		_update_enemies(delta)
+		_update_rift_zones(delta)
 		_update_pulses(delta)
 		_prune_disabled_links()
 		_check_wave_complete(delta)
@@ -184,25 +197,35 @@ func _spawn_ready_enemies() -> void:
 		_spawn_enemy(entry["type"], int(entry["lane"]))
 		spawn_index += 1
 
-func _spawn_enemy(type: StringName, lane: int) -> void:
+func _spawn_enemy(type: StringName, lane: int, segment: int = 0, segment_t: float = 0.0, hp_fraction: float = 1.0, reward_override: int = -1) -> void:
 	var definition: Dictionary = GameData.enemy_definitions()[type]
+	var health := float(definition["hp"]) * wave_hp_scale * hp_fraction
 	var enemy := {
 		"id": next_enemy_id, "type": type, "lane": lane,
-		"segment": 0, "segment_t": 0.0, "position": _cell_center(_path_for_lane(lane)[0]),
-		"hp": float(definition["hp"]), "max_hp": float(definition["hp"]),
+		"segment": segment, "segment_t": segment_t, "position": _cell_center(_path_for_lane(lane)[0]),
+		"hp": health, "max_hp": health, "reward_override": reward_override,
 		"slow_until": 0.0, "slow_factor": 1.0, "root_until": 0.0,
 		"marked_until": 0.0, "disable_cooldown": 0.0
 	}
+	enemy["position"] = _enemy_position(enemy)
 	next_enemy_id += 1
 	enemies.append(enemy)
 
 func _update_enemies(delta: float) -> void:
 	var leaked: Array[int] = []
+	var conductors: Array[Vector2] = []
+	for enemy in enemies:
+		if enemy["type"] == &"conductor": conductors.append(enemy["position"])
 	for index in range(enemies.size()):
 		var enemy: Dictionary = enemies[index]
 		if world_time >= float(enemy["root_until"]):
 			var definition: Dictionary = GameData.enemy_definitions()[enemy["type"]]
-			var speed := float(definition["speed"])
+			var speed := float(definition["speed"]) * wave_speed_scale
+			if enemy["type"] != &"conductor":
+				for conductor_position in conductors:
+					if Vector2(enemy["position"]).distance_to(conductor_position) <= CELL_SIZE * 2.5:
+						speed *= 1.3
+						break
 			if world_time < float(enemy["slow_until"]):
 				speed *= float(enemy["slow_factor"])
 			_advance_enemy(enemy, speed * delta)
@@ -313,6 +336,8 @@ func _apply_link_effects(pulse: Dictionary, start: Vector2, finish: Vector2) -> 
 				enemy["marked_until"] = world_time + 2.0
 				enemies[index] = enemy
 				_damage_enemy(index, 4.0, true)
+			&"mortar", &"rift":
+				_damage_enemy(index, 6.0, true)
 		effects.append({"type": "spark", "position": enemy["position"], "ttl": 0.22, "color": GameData.tower_definitions()[node_type]["color"]})
 	pulse["hit"] = hit
 
@@ -324,6 +349,8 @@ func _on_pulse_arrived(node_id: int) -> void:
 		&"arc": _fire_arc(node_id)
 		&"cryo": _fire_cryo(node_id)
 		&"lance": _fire_lance(node_id)
+		&"mortar": _fire_mortar(node_id)
+		&"rift": _fire_rift(node_id)
 	for child_id in graph.outgoing_for_pulse(node_id):
 		_spawn_pulse(node_id, child_id)
 
@@ -373,6 +400,33 @@ func _fire_lance_segment(start: Vector2, finish: Vector2) -> void:
 			_damage_enemy(index, amount, false)
 	effects.append({"type": "line", "from": start, "to": finish, "ttl": 0.24, "color": Color("ff5ba7")})
 
+func _fire_mortar(node_id: int) -> void:
+	var targets := _targets_in_range(_node_position(node_id), 4.0 + float(graph.modifiers["tower_range_bonus"]), 1)
+	if targets.is_empty(): return
+	var center: Vector2 = enemies[targets[0]]["position"]
+	for index in range(enemies.size() - 1, -1, -1):
+		if Vector2(enemies[index]["position"]).distance_to(center) <= CELL_SIZE * 1.15:
+			_damage_enemy(index, 20.0, false)
+	effects.append({"type": "burst", "position": center, "ttl": 0.45, "color": Color("ffd166")})
+	sfx_requested.emit(&"lance")
+
+func _fire_rift(node_id: int) -> void:
+	var targets := _targets_in_range(_node_position(node_id), 3.5 + float(graph.modifiers["tower_range_bonus"]), 1)
+	if targets.is_empty(): return
+	rift_zones.append({"position": enemies[targets[0]]["position"], "ttl": 2.5})
+	if rift_zones.size() > 12: rift_zones.remove_at(0)
+	sfx_requested.emit(&"cryo")
+
+func _update_rift_zones(delta: float) -> void:
+	for zone_index in range(rift_zones.size() - 1, -1, -1):
+		var zone: Dictionary = rift_zones[zone_index]
+		for enemy_index in range(enemies.size() - 1, -1, -1):
+			if Vector2(enemies[enemy_index]["position"]).distance_to(zone["position"]) <= CELL_SIZE * 1.25:
+				_damage_enemy(enemy_index, 13.0 * delta, false)
+		zone["ttl"] = float(zone["ttl"]) - delta
+		if float(zone["ttl"]) <= 0.0: rift_zones.remove_at(zone_index)
+		else: rift_zones[zone_index] = zone
+
 func _targets_in_range(origin: Vector2, radius_cells: float, limit: int) -> Array[int]:
 	var candidates: Array[int] = []
 	for index in range(enemies.size()):
@@ -397,10 +451,13 @@ func _damage_enemy(index: int, raw_amount: float, from_link: bool) -> void:
 	enemy["hp"] = float(enemy["hp"]) - amount
 	if float(enemy["hp"]) <= 0.0:
 		var definition: Dictionary = GameData.enemy_definitions()[enemy["type"]]
-		charge += int(definition["reward"])
+		charge += int(enemy["reward_override"]) if int(enemy.get("reward_override", -1)) >= 0 else int(definition["reward"])
 		charge_changed.emit(charge)
 		effects.append({"type": "burst", "position": enemy["position"], "ttl": 0.4, "color": definition["color"]})
 		enemies.remove_at(index)
+		if enemy["type"] == &"splitter":
+			for child in range(2):
+				_spawn_enemy(&"crawler", int(enemy["lane"]), int(enemy["segment"]), float(enemy["segment_t"]), 0.45, 0)
 		sfx_requested.emit(&"enemy_down")
 	else:
 		enemies[index] = enemy
@@ -605,6 +662,7 @@ func _distance_to_segment(point: Vector2, start: Vector2, finish: Vector2) -> fl
 func _draw() -> void:
 	_draw_board_surface()
 	_draw_paths()
+	_draw_rift_zones()
 	_draw_links()
 	_draw_nodes()
 	_draw_enemies()
@@ -641,6 +699,12 @@ func _draw_paths() -> void:
 		var spawn := _cell_center(_path_for_lane(lane)[0])
 		draw_circle(spawn, 18, Color("ff5b74"))
 		draw_circle(spawn, 9, Color("190b21"))
+
+func _draw_rift_zones() -> void:
+	for zone in rift_zones:
+		var alpha := clampf(float(zone["ttl"]) / 2.5, 0.0, 1.0)
+		draw_circle(zone["position"], CELL_SIZE * 1.25, Color(0.23, 0.38, 0.95, 0.12 * alpha))
+		draw_arc(zone["position"], CELL_SIZE * 1.25, 0, TAU, 32, Color(0.48, 0.67, 1.0, 0.45 * alpha), 3)
 
 func _draw_links() -> void:
 	for raw_id in graph.nodes:
@@ -690,6 +754,8 @@ func _draw_nodes() -> void:
 				var parent := _node_position(int(node["parent"]))
 				var direction := (pos - parent).normalized()
 				draw_line(pos - direction * 10, pos + direction * 12, color, 5)
+			&"mortar": draw_circle(pos, 8, color)
+			&"rift": draw_arc(pos, 10, 0, TAU, 20, color, 3)
 
 func _draw_enemies() -> void:
 	var font := ThemeDB.fallback_font

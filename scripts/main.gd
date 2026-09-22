@@ -6,6 +6,7 @@ var content_root: Control
 var sound_manager: SoundManager
 var last_seed := 0
 var last_difficulty := "normal"
+var active_level := 1
 
 func _ready() -> void:
 	theme = ThemeFactory.create_theme()
@@ -52,7 +53,7 @@ func _show_main_menu() -> void:
 	column.add_child(subtitle)
 	column.add_child(_vertical_gap(28))
 	var play := _menu_button("START RUN", Color("62f4d2"))
-	play.pressed.connect(_show_difficulty_select)
+	play.pressed.connect(_show_level_map)
 	column.add_child(play)
 	var deck := _menu_button("DECK  •  %d / 8" % save_data["deck"].size(), Color("9c82ff"))
 	deck.pressed.connect(_show_deck_builder)
@@ -67,7 +68,7 @@ func _show_main_menu() -> void:
 	settings.pressed.connect(_show_audio_settings)
 	column.add_child(settings)
 	var footer := Label.new()
-	footer.text = "Mobile-first vertical slice  •  Mouse + touch  •  Local progression"
+	footer.text = "Five levels  •  Endless challenges  •  Local progression"
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	footer.add_theme_color_override("font_color", Color("526f87"))
 	footer.add_theme_font_size_override("font_size", 13)
@@ -102,15 +103,55 @@ func _add_volume_slider(parent: VBoxContainer, label_text: String, save_key: Str
 	)
 	parent.add_child(slider)
 
-func _show_difficulty_select() -> void:
+func _show_level_map() -> void:
+	sound_manager.play_music(&"ambient")
 	_clear_content()
-	var shell := _page_shell("SELECT SIGNAL PRESSURE", "The enemy manifest stays identical. Information and build timing change.")
+	var shell := _page_shell("SIGNAL MAP", "Clear each node to open the next route and its Endless challenge.")
+	var body: VBoxContainer = shell["body"]
+	var map := Control.new()
+	map.custom_minimum_size = Vector2(1060, 425)
+	map.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	map.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_child(map)
+	var points := PackedVector2Array([
+		Vector2(120, 175), Vector2(330, 270), Vector2(540, 145),
+		Vector2(750, 265), Vector2(960, 175)
+	])
+	var route := Line2D.new()
+	route.points = points
+	route.width = 9.0
+	route.default_color = Color("315479")
+	map.add_child(route)
+	for level in range(1, LevelData.LEVEL_COUNT + 1):
+		var unlocked := SaveService.level_unlocked(save_data, level)
+		var cleared := SaveService.endless_unlocked(save_data, level)
+		var button := Button.new()
+		button.position = points[level - 1] - Vector2(91, 58)
+		button.size = Vector2(182, 116)
+		button.disabled = not unlocked
+		button.text = "LEVEL %d\n%s\n%s" % [level, LevelData.level_name(level), "CLEARED ✓" if cleared else ("AVAILABLE" if unlocked else "LOCKED")]
+		button.add_theme_font_size_override("font_size", 15)
+		button.add_theme_color_override("font_color", Color("62f4d2") if cleared else Color("d8edff"))
+		button.pressed.connect(_show_difficulty_select.bind(level))
+		map.add_child(button)
+	var progress := Label.new()
+	progress.text = "CAMPAIGN  %d / 5 COMPLETE    •    MORTAR AFTER LEVEL 2    •    RIFT AFTER LEVEL 4" % save_data["completed_levels"].size()
+	progress.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	progress.add_theme_color_override("font_color", Color("7b9bb6"))
+	body.add_child(progress)
+	_add_back_button(body, _show_main_menu, "MAIN MENU")
+
+func _show_difficulty_select(level: int) -> void:
+	_clear_content()
+	var shell := _page_shell("LEVEL %d  •  %s" % [level, LevelData.level_name(level)], "Choose signal pressure, then select three turret types.")
 	var body: VBoxContainer = shell["body"]
 	var row := HBoxContainer.new()
 	body.add_child(row)
-	for difficulty_id in ["easy", "normal", "hardcore"]:
+	var modes := ["easy", "normal", "hardcore"]
+	if SaveService.endless_unlocked(save_data, level): modes.append("endless")
+	for difficulty_id in modes:
 		var panel := PanelContainer.new()
-		panel.custom_minimum_size = Vector2(330, 385)
+		panel.custom_minimum_size = Vector2(240, 385)
 		panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(panel)
 		var column := VBoxContainer.new()
@@ -129,33 +170,79 @@ func _show_difficulty_select() -> void:
 		description.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		column.add_child(description)
 		var best := Label.new()
-		best.text = "BEST WAVE  %d / 10" % int(save_data["best_wave"][difficulty_id])
+		best.text = "BEST WAVE  %d%s" % [int(save_data["endless_best"][level - 1]) if difficulty_id == "endless" else int(save_data["campaign_best"][level - 1]), "" if difficulty_id == "endless" else " / 10"]
 		best.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		best.add_theme_color_override("font_color", Color("7b9bb6"))
 		column.add_child(best)
 		var button := Button.new()
 		button.text = "ENTER"
 		button.custom_minimum_size = Vector2(0, 56)
-		button.pressed.connect(_start_new_run.bind(difficulty_id, 0))
+		button.pressed.connect(_show_loadout_select.bind(level, difficulty_id, 0))
 		column.add_child(button)
-	_add_back_button(body, _show_main_menu)
+	_add_back_button(body, _show_level_map)
 
-func _start_new_run(difficulty_id: String, requested_seed: int) -> void:
+func _show_loadout_select(level: int, difficulty_id: String, requested_seed: int) -> void:
+	_clear_content()
+	var shell := _page_shell("CHOOSE THREE TURRETS", "Only your selected types can be built in this attempt.")
+	var body: VBoxContainer = shell["body"]
+	var selected: Array[StringName] = []
+	var unlocked := SaveService.unlocked_towers(save_data)
+	var counter := Label.new()
+	counter.text = "SELECTED  0 / 3"
+	counter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	counter.add_theme_color_override("font_color", Color("62f4d2"))
+	body.add_child(counter)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_child(grid)
+	var enter := _menu_button("ENTER LEVEL", Color("62f4d2"))
+	enter.disabled = true
+	for type in GameData.TOWER_ORDER:
+		var definition: Dictionary = GameData.tower_definitions()[type]
+		var button := Button.new()
+		button.toggle_mode = true
+		button.disabled = type not in unlocked
+		button.custom_minimum_size = Vector2(330, 145)
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.text = "%s  •  %d CHARGE\n%s\n%s" % [definition["name"], definition["cost"], definition["description"], "LOCKED" if type not in unlocked else ""]
+		button.toggled.connect(func(pressed: bool, tower_type: StringName = type):
+			if pressed:
+				if selected.size() >= 3:
+					button.set_pressed_no_signal(false)
+					return
+				selected.append(tower_type)
+			else:
+				selected.erase(tower_type)
+			counter.text = "SELECTED  %d / 3" % selected.size()
+			enter.disabled = selected.size() != 3
+		)
+		grid.add_child(button)
+	enter.pressed.connect(func(): _start_new_run(level, difficulty_id, requested_seed, selected))
+	body.add_child(enter)
+	_add_back_button(body, _show_difficulty_select.bind(level))
+
+func _start_new_run(level: int, difficulty_id: String, requested_seed: int, loadout: Array[StringName]) -> void:
+	if not SaveService.level_unlocked(save_data, level) or (difficulty_id == "endless" and not SaveService.endless_unlocked(save_data, level)):
+		return
+	if not SaveService.valid_loadout(save_data, loadout): return
 	var seed_to_use := requested_seed
 	if seed_to_use <= 0:
 		seed_to_use = randi_range(100000, 999999999)
 	last_seed = seed_to_use
 	last_difficulty = difficulty_id
+	active_level = level
 	save_data["last_difficulty"] = difficulty_id
 	SaveService.save_data(save_data)
 	_clear_content()
 	var game := GameController.new()
 	content_root.add_child(game)
 	game.sound_manager = sound_manager
-	game.exit_requested.connect(_show_main_menu)
+	game.exit_requested.connect(_show_level_map)
 	game.run_ended.connect(_on_run_ended)
 	game.tutorial_completed.connect(_on_tutorial_completed)
-	game.setup(difficulty_id, seed_to_use, save_data["deck"], not bool(save_data["tutorial_seen"]))
+	game.setup(difficulty_id, seed_to_use, save_data["deck"], not bool(save_data["tutorial_seen"]), level, loadout)
 	sound_manager.play_music(&"ambient")
 
 func _on_tutorial_completed() -> void:
@@ -165,10 +252,14 @@ func _on_tutorial_completed() -> void:
 func _on_run_ended(wave_reached: int, victory: bool, difficulty_id: String, seed_value: int) -> void:
 	var reward := 0
 	if victory: reward = 3
+	elif difficulty_id == "endless" and wave_reached >= 10: reward = 3
 	elif wave_reached >= 8: reward = 2
 	elif wave_reached >= 5: reward = 1
 	save_data["gene_shards"] = int(save_data["gene_shards"]) + reward
-	save_data["best_wave"][difficulty_id] = maxi(int(save_data["best_wave"][difficulty_id]), wave_reached)
+	if victory: SaveService.complete_level(save_data, active_level)
+	SaveService.record_wave(save_data, active_level, maxi(0, wave_reached - 1) if difficulty_id == "endless" else wave_reached, difficulty_id == "endless")
+	if save_data["best_wave"].has(difficulty_id):
+		save_data["best_wave"][difficulty_id] = maxi(int(save_data["best_wave"][difficulty_id]), wave_reached)
 	SaveService.save_data(save_data)
 	_show_results(wave_reached, victory, difficulty_id, seed_value, reward)
 
@@ -180,17 +271,17 @@ func _show_results(wave_reached: int, victory: bool, difficulty_id: String, seed
 	var shell := _page_shell("CORE STABLE" if victory else "CORE COLLAPSED", "The network survived." if victory else "The pattern failed. Rebuild the geometry.")
 	var body: VBoxContainer = shell["body"]
 	var summary := Label.new()
-	summary.text = "WAVE  %d / 10\nMODE  %s\nSEED  %d\n\nGENE SHARDS  +%d" % [wave_reached, GameData.difficulty_name(difficulty_id), seed_value, reward]
+	summary.text = "LEVEL  %d\n%s  %d%s\nMODE  %s\nSEED  %d\n\nGENE SHARDS  +%d" % [active_level, "WAVES SURVIVED" if difficulty_id == "endless" else "WAVE", maxi(0, wave_reached - 1) if difficulty_id == "endless" else wave_reached, "" if difficulty_id == "endless" else " / 10", "ENDLESS" if difficulty_id == "endless" else GameData.difficulty_name(difficulty_id), seed_value, reward]
 	summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	summary.add_theme_font_size_override("font_size", 25)
 	summary.add_theme_color_override("font_color", Color("62f4d2") if victory else Color("ff6b91"))
 	body.add_child(summary)
 	body.add_child(_vertical_gap(20))
 	var replay := _menu_button("REPLAY THIS SEED", Color("9c82ff"))
-	replay.pressed.connect(_start_new_run.bind(difficulty_id, seed_value))
+	replay.pressed.connect(_show_loadout_select.bind(active_level, difficulty_id, seed_value))
 	body.add_child(replay)
 	var fresh := _menu_button("NEW RUN", Color("62f4d2"))
-	fresh.pressed.connect(_show_difficulty_select)
+	fresh.pressed.connect(_show_level_map)
 	body.add_child(fresh)
 	_add_back_button(body, _show_main_menu, "MAIN MENU")
 
@@ -342,7 +433,7 @@ func _show_how_to_play() -> void:
 	var shell := _page_shell("HOW TO ROUTE POWER", "Placement controls both link effects and tower attacks.")
 	var body: VBoxContainer = shell["body"]
 	var guide := Label.new()
-	guide.text = "BUILD\nChoose a tower, tap an empty cell to preview its nearest valid parent, then tap again to confirm. Connections cannot pass through dark scar tissue unless Phase Axon is active. Select a node to rewire or recycle its whole branch.\n\nPULSES\nThe Core sends pulses down every root branch. A destination tower defines the inbound link effect, then fires when the pulse arrives. Relays rotate between child branches, so coverage trades against cadence.\n\nCOUNTERS\nHusks resist turrets. Phase Mites resist links. Leeches and the Severer disable crossed links. Use both halves of the network and avoid a single fragile trunk.\n\nDRAFTS\nAfter every second wave, select a topology mutation from your eight-card deck. Cards last for the current run. Permanent collection unlocks only expand deck-building choices."
+	guide.text = "CAMPAIGN\nChoose a level on the signal map, select a difficulty, then bring three turret types. Clearing a level opens the next route and Endless for the route you cleared.\n\nBUILD\nChoose a tower, tap an empty cell to preview its nearest valid parent, then tap again to confirm. Connections cannot pass through dark scar tissue unless Phase Axon is active. Select a node to rewire or recycle its whole branch.\n\nPULSES\nThe Core sends pulses down every root branch. A destination tower defines the inbound link effect, then fires when the pulse arrives. Relays rotate between child branches, so coverage trades against cadence.\n\nCOUNTERS\nHusks resist turrets, Phase Mites resist links, Splitters release crawlers, and Conductors speed nearby enemies. Leeches and the Severer disable crossed links.\n\nDRAFTS\nAfter every second wave, select a topology mutation from your eight-card deck. Cards last for the current run."
 	guide.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	guide.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	guide.add_theme_font_size_override("font_size", 18)
@@ -401,6 +492,7 @@ func _difficulty_color(id: String) -> Color:
 	match id:
 		"easy": return Color("62f4d2")
 		"hardcore": return Color("ff5b74")
+		"endless": return Color("ffd166")
 	return Color("9c82ff")
 
 func _show_notice(message: String) -> void:

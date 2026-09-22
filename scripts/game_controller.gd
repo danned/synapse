@@ -6,6 +6,8 @@ signal run_ended(wave_reached: int, victory: bool, difficulty: String, seed_valu
 signal tutorial_completed
 
 var difficulty := "normal"
+var level := 1
+var loadout: Array[StringName] = []
 var seed_value := 0
 var deck: Array[String] = []
 var manifests: Array[Dictionary] = []
@@ -33,14 +35,20 @@ var _run_over := false
 var _exit_confirmation: Control
 var sound_manager: SoundManager
 
-func setup(p_difficulty: String, p_seed: int, p_deck: Array, show_tutorial: bool) -> void:
+func setup(p_difficulty: String, p_seed: int, p_deck: Array, show_tutorial: bool, p_level: int = 1, p_loadout: Array = []) -> void:
 	difficulty = p_difficulty
+	level = p_level
+	loadout.clear()
+	for type in p_loadout:
+		loadout.append(StringName(type))
+	if loadout.is_empty():
+		loadout = [&"relay", &"arc", &"cryo"]
 	seed_value = p_seed
 	for card_id in p_deck:
 		deck.append(str(card_id))
-	manifests = RunGenerator.generate_run(seed_value)
+	manifests = RunGenerator.generate_run(seed_value, level)
 	_build_ui()
-	board.configure(seed_value, difficulty)
+	board.configure(seed_value, difficulty, level)
 	_update_wave_preview()
 	_update_build_policy()
 	if show_tutorial:
@@ -56,8 +64,8 @@ func _build_ui() -> void:
 	top.add_child(top_row)
 	charge_label = _hud_label("CHARGE 220", Color("62f4d2"), 175)
 	integrity_label = _hud_label("CORE 20", Color("ff6b91"), 145)
-	wave_label = _hud_label("WAVE 0 / 10", Color("d8edff"), 175)
-	mode_label = _hud_label(GameData.difficulty_name(difficulty), Color("9c82ff"), 260)
+	wave_label = _hud_label("WAVE 0 / ∞" if difficulty == "endless" else "WAVE 0 / 10", Color("d8edff"), 175)
+	mode_label = _hud_label("L%d  %s" % [level, "ENDLESS" if difficulty == "endless" else GameData.difficulty_name(difficulty)], Color("9c82ff"), 260)
 	top_row.add_child(charge_label)
 	top_row.add_child(integrity_label)
 	top_row.add_child(wave_label)
@@ -115,7 +123,7 @@ func _build_ui() -> void:
 	add_child(bottom)
 	var row := HBoxContainer.new()
 	bottom.add_child(row)
-	for type in GameData.TOWER_ORDER:
+	for type in loadout:
 		var definition: Dictionary = GameData.tower_definitions()[type]
 		var button := Button.new()
 		button.text = "%s  •  %d\n%s" % [definition["name"], definition["cost"], str(definition["tagline"]).to_upper()]
@@ -223,7 +231,7 @@ func _request_menu_exit() -> void:
 	var column := VBoxContainer.new()
 	panel.add_child(column)
 	var title := Label.new()
-	title.text = "RETURN TO MAIN MENU?"
+	title.text = "RETURN TO SIGNAL MAP?"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 28)
 	title.add_theme_color_override("font_color", Color("62f4d2"))
@@ -241,7 +249,7 @@ func _request_menu_exit() -> void:
 	keep_playing.pressed.connect(_cancel_menu_exit)
 	actions.add_child(keep_playing)
 	var return_to_menu := Button.new()
-	return_to_menu.text = "RETURN TO MAIN MENU"
+	return_to_menu.text = "RETURN TO MAP"
 	return_to_menu.custom_minimum_size = Vector2(260, 56)
 	return_to_menu.pressed.connect(_confirm_menu_exit)
 	actions.add_child(return_to_menu)
@@ -300,19 +308,24 @@ func _toggle_tactical_pause() -> void:
 	_update_build_policy()
 
 func _launch_next_wave() -> void:
-	if next_wave_index >= manifests.size() or board.wave_active or _run_over:
+	if board.wave_active or _run_over:
 		return
+	_ensure_next_manifest()
+	if next_wave_index >= manifests.size(): return
 	countdown = -1.0
 	board.set_combat_paused(false)
 	pause_button.text = "PAUSE"
 	var manifest := manifests[next_wave_index]
 	board.start_wave(manifest)
 	if is_instance_valid(sound_manager):
-		sound_manager.play_music(&"boss" if next_wave_index == 9 else &"combat")
+		var boss_wave := false
+		for entry in manifest["entries"]:
+			if entry["type"] == &"severer": boss_wave = true
+		sound_manager.play_music(&"boss" if boss_wave else &"combat")
 	next_wave_index += 1
 	start_button.disabled = true
 	start_button.text = "WAVE ACTIVE"
-	wave_label.text = "WAVE %d / %d" % [next_wave_index, GameData.MAX_WAVES]
+	wave_label.text = "WAVE %d / ∞" % next_wave_index if difficulty == "endless" else "WAVE %d / %d" % [next_wave_index, GameData.MAX_WAVES]
 	_update_wave_preview()
 	_update_build_policy()
 	_set_status("Signals live • watch the routing cadence")
@@ -322,7 +335,7 @@ func _on_wave_finished() -> void:
 		sound_manager.play_music(&"ambient")
 	if _run_over:
 		return
-	if next_wave_index >= GameData.MAX_WAVES:
+	if difficulty != "endless" and next_wave_index >= GameData.MAX_WAVES:
 		_finish_run(true)
 		return
 	if next_wave_index % 2 == 0:
@@ -364,9 +377,14 @@ func _update_build_policy() -> void:
 	sell_button.disabled = not allowed or board.selected_node_id <= 0
 
 static func is_build_allowed(difficulty_id: String, wave_active: bool) -> bool:
-	return not wave_active or difficulty_id != "normal"
+	return not wave_active or difficulty_id in ["easy", "hardcore"]
+
+func _ensure_next_manifest() -> void:
+	if difficulty == "endless" and next_wave_index >= manifests.size():
+		manifests.append(RunGenerator.generate_wave(seed_value, next_wave_index + 1, level, true))
 
 func _update_wave_preview() -> void:
+	_ensure_next_manifest()
 	if next_wave_index >= manifests.size():
 		intel_label.text = "NO FURTHER\nSIGNALS"
 		return
@@ -381,7 +399,7 @@ func _update_wave_preview() -> void:
 			lines.append("")
 			lines.append("▲ %d  ▼ %d" % [summary["lanes"][0], summary["lanes"][1]])
 			intel_label.text = "\n".join(lines)
-		"normal":
+		"normal", "endless":
 			var names: Array[String] = []
 			for type in summary["counts"]: names.append(definitions[type]["name"])
 			var top_word := _threat_word(int(summary["lanes"][0]))
@@ -473,7 +491,7 @@ func _show_tutorial() -> void:
 	title.add_theme_color_override("font_color", Color("62f4d2"))
 	column.add_child(title)
 	var body := Label.new()
-	body.text = "1. Place a RELAY within four cells of the Core.\n\n2. Place an ARC so its connection crosses an enemy lane. Tap a cell once to preview, then again to confirm.\n\n3. Start the wave. Core pulses travel along links; the link activates in transit and the tower fires on arrival.\n\n4. Branching alternates pulses. More coverage means a slower cadence on each branch.\n\nRight-click or use another tower button to cancel a placement."
+	body.text = "1. Place a RELAY within four cells of the Core.\n\n2. Place a damage tower so its connection crosses an enemy lane. Tap a cell once to preview, then again to confirm.\n\n3. Start the wave. Core pulses travel along links; the link activates in transit and the tower fires on arrival.\n\n4. Branching alternates pulses. More coverage means a slower cadence on each branch.\n\nRight-click or use another tower button to cancel a placement."
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	body.add_theme_font_size_override("font_size", 19)

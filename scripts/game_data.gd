@@ -8,7 +8,7 @@ const STARTING_CHARGE := 220
 const STARTING_INTEGRITY := 20
 const MAX_WAVES := 10
 
-const TOWER_ORDER := [&"relay", &"arc", &"cryo", &"lance"]
+const TOWER_ORDER := [&"relay", &"arc", &"cryo", &"lance", &"mortar", &"rift"]
 const BASE_CARD_IDS := [
 	"long_axons", "myelin", "wide_conduit", "focused_receptor",
 	"extra_dendrite", "priority_gate", "cold_wake", "bidirectional_lance"
@@ -38,6 +38,16 @@ static func tower_definitions() -> Dictionary:
 			"name": "LANCE", "tagline": "Mark + pierce", "cost": 100,
 			"reach": 4.0, "children": 1, "color": Color("ff5ba7"),
 			"description": "Fires through its placement vector when pulsed."
+		},
+		&"mortar": {
+			"name": "MORTAR", "tagline": "Splash burst", "cost": 115,
+			"reach": 3.5, "children": 1, "color": Color("ffd166"),
+			"description": "Its link chips enemies; its node blasts a group."
+		},
+		&"rift": {
+			"name": "RIFT", "tagline": "Lingering zone", "cost": 125,
+			"reach": 3.5, "children": 1, "color": Color("77aaff"),
+			"description": "Its link burns; its node leaves a damaging field."
 		}
 	}
 
@@ -72,6 +82,16 @@ static func enemy_definitions() -> Dictionary:
 			"name": "SEVERER", "hp": 520.0, "speed": 0.46, "reward": 60,
 			"leak": 8, "threat": 20.0, "color": Color("ff397c"),
 			"trait": "Boss • repeatedly severs links"
+		},
+		&"splitter": {
+			"name": "Splitter", "hp": 62.0, "speed": 0.86, "reward": 9,
+			"leak": 2, "threat": 3.2, "color": Color("f4a261"),
+			"trait": "Releases two weak crawlers on death"
+		},
+		&"conductor": {
+			"name": "Conductor", "hp": 88.0, "speed": 0.76, "reward": 12,
+			"leak": 2, "threat": 4.0, "color": Color("e9ff70"),
+			"trait": "Speeds nearby enemies"
 		}
 	}
 
@@ -125,10 +145,12 @@ static func difficulty_name(id: String) -> String:
 	match id:
 		"easy": return "EASY / FLOW"
 		"hardcore": return "HARDCORE / SURGE"
+		"endless": return "ENDLESS"
 	return "NORMAL / PULSE"
 
 static func difficulty_description(id: String) -> String:
 	match id:
 		"easy": return "Full wave intel. Build live or pause combat at any time."
 		"hardcore": return "Minimal intel. Waves auto-launch; build in real time."
+		"endless": return "Survive as many waves as you can. Build between waves."
 	return "Partial wave intel. Build only between waves."

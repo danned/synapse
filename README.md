@@ -10,6 +10,10 @@ godot --path .
 
 The project uses a 1280×720 landscape reference viewport and supports both mouse and touch input.
 
+## Campaign
+
+The signal map contains five levels with distinct enemy routes and ten waves each. Clear a level on any standard difficulty to unlock the next one and Endless on the cleared level. Before each attempt, choose three turret types for the build bar. The four original types are available immediately; Mortar unlocks after level 2 and Rift after level 4. Endless uses Normal build timing, generates waves without a fixed end, and records the best wave survived for each level.
+
 ## Tests
 
 ```bash

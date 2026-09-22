@@ -1,31 +1,44 @@
 class_name RunGenerator
 extends RefCounted
 
-const WAVE_BUDGETS := [10.0, 14.0, 19.0, 25.0, 32.0, 40.0, 49.0, 59.0, 70.0, 45.0]
+const WAVE_BUDGETS := [10.0, 14.0, 19.0, 25.0, 32.0, 40.0, 49.0, 59.0, 70.0, 82.0]
 
-static func generate_run(seed_value: int) -> Array[Dictionary]:
+static func generate_run(seed_value: int, level: int = 1) -> Array[Dictionary]:
 	var waves: Array[Dictionary] = []
 	for wave_number in range(1, GameData.MAX_WAVES + 1):
-		waves.append(generate_wave(seed_value, wave_number))
+		waves.append(generate_wave(seed_value, wave_number, level))
 	return waves
 
-static func generate_wave(seed_value: int, wave_number: int) -> Dictionary:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed_value * 7919 + wave_number * 104729
-	var definitions := GameData.enemy_definitions()
+static func available_types(level: int, wave_number: int) -> Array[StringName]:
 	var available: Array[StringName] = [&"crawler"]
 	if wave_number >= 2: available.append(&"skitter")
-	if wave_number >= 3: available.append(&"husk")
-	if wave_number >= 4: available.append(&"phase")
-	if wave_number >= 5: available.append(&"leech")
-	var budget: float = WAVE_BUDGETS[wave_number - 1]
+	if level >= 2 and wave_number >= 3: available.append(&"husk")
+	if level >= 3 and wave_number >= 3: available.append(&"splitter")
+	if level >= 3 and wave_number >= 4: available.append(&"phase")
+	if level >= 4 and wave_number >= 5: available.append(&"leech")
+	if level >= 5 and wave_number >= 3: available.append(&"conductor")
+	return available
+
+static func generate_wave(seed_value: int, wave_number: int, level: int = 1, endless: bool = false) -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value * 7919 + wave_number * 104729 + level * 65537
+	var definitions := GameData.enemy_definitions()
+	var available := available_types(level, wave_number)
+	var extra_waves := maxi(0, wave_number - GameData.MAX_WAVES) if endless else 0
+	var base_budget: float = WAVE_BUDGETS[mini(wave_number, GameData.MAX_WAVES) - 1]
+	var level_multiplier := 0.6 + 0.2 * (level - 1)
+	var budget: float = (base_budget + extra_waves * 5.0) * level_multiplier
 	var entries: Array[Dictionary] = []
 	var current_time := 0.0
-	if wave_number == 10:
+	if (level == LevelData.LEVEL_COUNT and wave_number == 10) or (endless and wave_number >= 20 and wave_number % 10 == 0):
 		entries.append({"time": 2.0, "type": &"severer", "lane": rng.randi_range(0, 1)})
-		current_time = 0.0
+		budget -= 20.0
+	if wave_number == 3 and level >= 3:
+		var introduction: StringName = &"conductor" if level >= 5 else &"splitter"
+		entries.append({"time": 1.0, "type": introduction, "lane": rng.randi_range(0, 1)})
+		budget -= float(definitions[introduction]["threat"])
 	var safety := 0
-	while budget >= 0.95 and safety < 200:
+	while budget >= 0.95 and safety < 60:
 		safety += 1
 		var candidates: Array[StringName] = []
 		for type in available:
@@ -40,10 +53,13 @@ static func generate_wave(seed_value: int, wave_number: int) -> Dictionary:
 		current_time += rng.randf_range(0.42, 1.05)
 		entries.append({"time": current_time, "type": type, "lane": rng.randi_range(0, 1)})
 	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a["time"]) < float(b["time"]))
+	var hp_scale := (1.0 + 0.08 * (level - 1)) * minf(1000000.0, pow(1.14, extra_waves))
 	return {
 		"wave": wave_number,
 		"seed": seed_value,
-		"budget": WAVE_BUDGETS[wave_number - 1] + (20.0 if wave_number == 10 else 0.0),
+		"budget": (base_budget + extra_waves * 5.0) * level_multiplier,
+		"hp_scale": hp_scale,
+		"speed_scale": minf(1.5, 1.0 + extra_waves * 0.015),
 		"entries": entries
 	}
 
