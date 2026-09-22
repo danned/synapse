@@ -75,20 +75,23 @@ The Compose service mounts only the host login file at `~/.codex/auth.json`, so
 an existing Codex login is reused automatically. Set `CODEX_AUTH_FILE` if your
 login file is elsewhere. The mount is writable so refreshed credentials persist
 on the host. `./scripts/sandbox login` remains available if reauthentication is
-needed.
+needed. On Wayland, `./scripts/sandbox codex` also bind-mounts the active display
+socket and passes a container-local `XDG_RUNTIME_DIR`, which allows Codex to paste
+clipboard images without exposing other files from the host runtime directory.
+Set `SANDBOX_WAYLAND_SOCKET` to override the detected socket path.
 
 On first startup, the container seeds `.sandbox/codex.config.toml` into the
 writable, persistent Codex data volume and marks `/workspace` as trusted. Every
 `codex` invocation therefore defaults to `danger-full-access` with no approval
 prompts—even when started from `./scripts/sandbox shell` or directly through
 Compose—and later Codex settings can still be saved. Docker is the outer
-boundary: only this repository is bind-mounted, the container is not privileged,
-no Docker socket or host home directory is mounted, and CPU, memory, and process
-limits are applied. The one host credential file described above is mounted
-explicitly. The container does have outbound network access, which Codex and
-package managers require. Use full-access mode only for trusted repositories
-because processes in the container can read the mounted repository and Codex
-credential.
+boundary: the repository, host login file, and (for `./scripts/sandbox codex` on
+Wayland) active display socket are the only host paths mounted. The container is
+not privileged, no Docker socket or host home directory is mounted, and CPU,
+memory, and process limits are applied. The container does have outbound network
+access, which Codex and package managers require. Use full-access mode only for
+trusted repositories because processes in the container can read the mounted
+repository, Codex credential, and current clipboard contents.
 
 Useful commands:
 

@@ -13,6 +13,35 @@ compose() {
 	docker compose --project-directory "${repo_root}" --file "${compose_file}" "$@"
 }
 
+codex_wayland_args() {
+	local host_runtime_dir
+	local host_wayland_display
+	local host_wayland_socket
+	local container_runtime_dir
+	local container_wayland_display
+
+	host_runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+	host_wayland_display="${WAYLAND_DISPLAY:-}"
+	container_runtime_dir="/run/user/${SANDBOX_UID}"
+	container_wayland_display="wayland-sandbox"
+
+	if [[ -z "${host_wayland_display}" ]]; then
+		return
+	fi
+
+	host_wayland_socket="${SANDBOX_WAYLAND_SOCKET:-${host_runtime_dir}/${host_wayland_display}}"
+	if [[ ! -S "${host_wayland_socket}" ]]; then
+		echo "sandbox: Wayland socket is unavailable: ${host_wayland_socket}" >&2
+		echo "sandbox: continuing without host clipboard access" >&2
+		return
+	fi
+
+	printf '%s\0' \
+		--env "XDG_RUNTIME_DIR=${container_runtime_dir}" \
+		--env "WAYLAND_DISPLAY=${container_wayland_display}" \
+		--volume "${host_wayland_socket}:${container_runtime_dir}/${container_wayland_display}:ro"
+}
+
 usage() {
 	cat <<'EOF'
 Usage: ./scripts/sandbox COMMAND [ARGS...]
@@ -45,7 +74,11 @@ case "${command}" in
 		compose run --rm sandbox bash "$@"
 		;;
 	codex)
-		compose run --rm sandbox codex "$@"
+		wayland_args=()
+		while IFS= read -r -d '' arg; do
+			wayland_args+=("${arg}")
+		done < <(codex_wayland_args)
+		compose run --rm "${wayland_args[@]}" sandbox codex "$@"
 		;;
 	login)
 		compose run --rm sandbox codex login --device-auth "$@"

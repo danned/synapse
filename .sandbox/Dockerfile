@@ -30,6 +30,7 @@ RUN apt-get update \
 		ripgrep \
 		sudo \
 		unzip \
+		wl-clipboard \
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN godot_archive="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip" \
@@ -63,6 +64,7 @@ RUN groupmod --gid "${SANDBOX_GID}" --new-name sandbox node \
 	&& printf 'sandbox ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/sandbox \
 	&& chmod 0440 /etc/sudoers.d/sandbox \
 	&& mkdir -p /home/sandbox/.codex /home/sandbox/.local/share/godot/export_templates \
+	&& install -d -m 0700 -o "${SANDBOX_UID}" -g "${SANDBOX_GID}" "/run/user/${SANDBOX_UID}" \
 	&& ln -s "/opt/godot/export_templates/${GODOT_VERSION}.stable" \
 		"/home/sandbox/.local/share/godot/export_templates/${GODOT_VERSION}.stable" \
 	&& chown -R sandbox:sandbox /home/sandbox
