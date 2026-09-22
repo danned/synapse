@@ -1,4 +1,5 @@
 .godot/
 dist/
 *.log
+.env
 

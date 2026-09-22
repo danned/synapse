@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "${script_dir}/.." && pwd)"
+compose_file="${repo_root}/compose.sandbox.yaml"
+
+export SANDBOX_UID="${SANDBOX_UID:-$(id -u)}"
+export SANDBOX_GID="${SANDBOX_GID:-$(id -g)}"
+
+compose() {
+	docker compose --project-directory "${repo_root}" --file "${compose_file}" "$@"
+}
+
+usage() {
+	cat <<'EOF'
+Usage: ./scripts/sandbox COMMAND [ARGS...]
+
+Commands:
+  build              Build the development image.
+  shell              Open a shell with unrestricted access inside the container.
+  codex [ARGS...]    Run Codex with full access inside the container boundary.
+  login              Authenticate Codex using device login.
+  test               Import the project and run the complete test suite.
+  web                 Export the game and serve it at http://127.0.0.1:8060/.
+  run COMMAND [...]  Run any command inside a fresh sandbox container.
+  down                Remove stopped containers and the sandbox network.
+
+The repository is the only host path mounted into the container. Codex credentials
+and the npm cache live in Docker-managed volumes and survive between runs.
+EOF
+}
+
+command="${1:-}"
+if [[ -n "${command}" ]]; then
+	shift
+fi
+
+case "${command}" in
+	build)
+		compose build "$@"
+		;;
+	shell)
+		compose run --rm sandbox bash "$@"
+		;;
+	codex)
+		compose run --rm sandbox codex --dangerously-bypass-approvals-and-sandbox "$@"
+		;;
+	login)
+		compose run --rm sandbox codex login --device-auth "$@"
+		;;
+	test)
+		compose run --rm sandbox bash -lc \
+			'godot --headless --editor --path . --quit && godot --headless --path . --script res://tests/run_tests.gd'
+		;;
+	web)
+		echo "Serving the exported game at http://127.0.0.1:${SANDBOX_WEB_PORT:-8060}/"
+		compose run --rm --service-ports sandbox bash -lc \
+			'mkdir -p dist/web && godot --headless --path . --export-release Web dist/web/index.html && python3 -m http.server 8060 --bind 0.0.0.0 --directory dist/web'
+		;;
+	run)
+		if (($# == 0)); then
+			echo "sandbox: run requires a command" >&2
+			exit 2
+		fi
+		compose run --rm sandbox "$@"
+		;;
+	down)
+		compose down "$@"
+		;;
+	-h|--help|help|"")
+		usage
+		;;
+	*)
+		echo "sandbox: unknown command: ${command}" >&2
+		usage >&2
+		exit 2
+		;;
+esac

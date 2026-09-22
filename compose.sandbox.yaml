@@ -1,0 +1,40 @@
+name: synapse-sandbox
+
+services:
+  sandbox:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: .sandbox/Dockerfile
+      args:
+        CODEX_VERSION: ${CODEX_VERSION:-0.147.0}
+        GODOT_VERSION: ${GODOT_VERSION:-4.7.2}
+        SANDBOX_UID: ${SANDBOX_UID:-1000}
+        SANDBOX_GID: ${SANDBOX_GID:-1000}
+    image: synapse-sandbox:local
+    privileged: false
+    init: true
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    environment:
+      HOME: /home/sandbox
+    volumes:
+      - type: bind
+        source: .
+        target: /workspace
+      - type: volume
+        source: codex-data
+        target: /home/sandbox/.codex
+      - type: volume
+        source: npm-cache
+        target: /home/sandbox/.npm
+    ports:
+      - 127.0.0.1:${SANDBOX_WEB_PORT:-8060}:8060
+    mem_limit: ${SANDBOX_MEMORY_LIMIT:-8g}
+    cpus: ${SANDBOX_CPU_LIMIT:-4}
+    pids_limit: ${SANDBOX_PID_LIMIT:-1024}
+
+volumes:
+  codex-data:
+  npm-cache:
