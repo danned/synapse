@@ -11,6 +11,7 @@ signal sfx_requested(event: StringName)
 
 const CELL_SIZE := 64.0
 const LINK_WIDTH := 0.42
+const LANCE_ICON_FORWARD := Vector2(-1.0, -1.0)
 
 var graph := NetworkGraph.new()
 var charge := GameData.STARTING_CHARGE
@@ -757,7 +758,13 @@ func _draw_nodes() -> void:
 		draw_circle(pos, 22, Color(color, 0.2))
 		draw_circle(pos, 16, Color("0b1829"))
 		var icon := GameArt.tower_icon(node["type"])
-		draw_texture_rect(icon, Rect2(pos - Vector2(14, 14), Vector2(28, 28)), false, color)
+		if node["type"] == &"lance":
+			var direction := (pos - _node_position(int(node["parent"]))).normalized()
+			draw_set_transform(pos, LANCE_ICON_FORWARD.angle_to(direction), Vector2.ONE)
+			draw_texture_rect(icon, Rect2(Vector2(-14, -14), Vector2(28, 28)), false, color)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		else:
+			draw_texture_rect(icon, Rect2(pos - Vector2(14, 14), Vector2(28, 28)), false, color)
 
 func _draw_enemies() -> void:
 	var font := ThemeDB.fallback_font
