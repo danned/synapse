@@ -8,6 +8,7 @@ signal run_failed(wave_reached: int)
 signal node_selected(node_id: int)
 signal message_requested(text: String)
 signal sfx_requested(event: StringName)
+signal coverage_changed
 
 const CELL_SIZE := 64.0
 const LINK_WIDTH := 0.42
@@ -29,6 +30,7 @@ var selected_node_id := -1
 var preview_cell := Vector2i(-1, -1)
 var preview_parents: Array[int] = []
 var preview_parent_index := 0
+var coverage_enabled := true
 var rewire_mode := false
 var build_allowed := true
 var combat_paused := false
@@ -85,10 +87,90 @@ func configure(seed_value: int, difficulty_id: String, level_id: int = 1, perks:
 	charge = GameData.STARTING_CHARGE + 10 * _perk_level("reserve_cells")
 	integrity = GameData.STARTING_INTEGRITY + _perk_level("core_lattice")
 	graph = NetworkGraph.new()
+	graph.changed.connect(_on_graph_changed)
 	rift_zones.clear()
 	charge_changed.emit(charge)
 	integrity_changed.emit(integrity)
 	queue_redraw()
+	coverage_changed.emit()
+
+func _on_graph_changed() -> void:
+	queue_redraw()
+	coverage_changed.emit()
+
+func set_coverage_enabled(value: bool) -> void:
+	coverage_enabled = value
+	queue_redraw()
+	coverage_changed.emit()
+
+func _focused_edge() -> Dictionary:
+	if preview_cell.x >= 0 and not preview_parents.is_empty() and not selected_tower.is_empty():
+		return {"parent": preview_parents[preview_parent_index], "cell": preview_cell, "type": selected_tower, "preview": true}
+	if selected_node_id > 0 and graph.nodes.has(selected_node_id):
+		var node: Dictionary = graph.nodes[selected_node_id]
+		return {"parent": int(node["parent"]), "cell": node["cell"], "type": node["type"], "preview": false, "id": selected_node_id}
+	return {}
+
+func _edge_interval(node_id: int) -> float:
+	var interval := 1.2 * float(graph.modifiers["core_interval_mult"])
+	var cursor := node_id
+	while cursor > 0 and graph.nodes.has(cursor):
+		var parent_id: int = graph.nodes[cursor]["parent"]
+		if parent_id > 0:
+			interval *= maxi(1, graph.nodes[parent_id]["children"].size())
+		cursor = parent_id
+	return interval
+
+func coverage_snapshot() -> Dictionary:
+	var edge := _focused_edge()
+	if edge.is_empty():
+		return {}
+	var parent_id: int = edge["parent"]
+	var parent: Dictionary = graph.nodes[parent_id]
+	var preview: bool = edge["preview"]
+	var children: Array = parent["children"]
+	var count := children.size() + (1 if preview else 0)
+	var parent_interval := _edge_interval(parent_id)
+	var child_interval := parent_interval * (count if parent_id > 0 else 1)
+	var rows: Array[String] = []
+	for child_id in children:
+		rows.append("%s %d: ~%.1fs" % [_node_name(child_id), child_id, child_interval])
+	if preview:
+		rows.append("NEW %s: ~%.1fs" % [str(GameData.tower_definitions()[edge["type"]]["name"]), child_interval])
+	else:
+		var id: int = edge["id"]
+		var node_children: Array = graph.nodes[id]["children"]
+		if not node_children.is_empty():
+			rows.clear()
+			var downstream_interval := _edge_interval(id) * (node_children.size() if id > 0 else 1)
+			for child_id in node_children:
+				rows.append("%s %d: ~%.1fs" % [_node_name(child_id), child_id, downstream_interval])
+	return {
+		"title": "NEW LINK" if preview else "%s %d" % [_node_name(int(edge["id"])), int(edge["id"])],
+		"interval": child_interval if preview else _edge_interval(int(edge["id"])),
+		"rows": rows,
+		"warning": preview and parent_id > 0 and children.size() > 0,
+		"lanes": _covered_lanes(_node_position(parent_id), _cell_center(edge["cell"]), edge["type"])
+	}
+
+func _covered_lanes(start: Vector2, finish: Vector2, tower_type: StringName) -> Array[bool]:
+	var covered: Array[bool] = [false, false]
+	if tower_type == &"relay":
+		return covered
+	var width := CELL_SIZE * LINK_WIDTH * float(graph.modifiers["link_width_mult"])
+	for lane in range(2):
+		var path := _path_for_lane(lane)
+		for index in range(path.size() - 1):
+			var a := _cell_center(path[index])
+			var b := _cell_center(path[index + 1])
+			var steps := maxi(1, ceili(a.distance_to(b) / 8.0))
+			for step in range(steps + 1):
+				if _distance_to_segment(a.lerp(b, float(step) / steps), start, finish) <= width:
+					covered[lane] = true
+					break
+			if covered[lane]:
+				break
+	return covered
 
 func _perk_level(id: String) -> int:
 	return clampi(int(permanent_perks.get(id, 0)), 0, 3)
@@ -100,6 +182,7 @@ func set_selected_tower(type: StringName) -> void:
 	preview_cell = Vector2i(-1, -1)
 	preview_parents.clear()
 	queue_redraw()
+	coverage_changed.emit()
 
 func clear_tool() -> void:
 	selected_tower = &""
@@ -107,6 +190,7 @@ func clear_tool() -> void:
 	preview_cell = Vector2i(-1, -1)
 	preview_parents.clear()
 	queue_redraw()
+	coverage_changed.emit()
 
 func set_build_allowed(value: bool) -> void:
 	build_allowed = value
@@ -139,6 +223,7 @@ func cycle_preview_parent() -> void:
 	preview_parent_index = (preview_parent_index + 1) % preview_parents.size()
 	message_requested.emit("Connection source: %s" % _node_name(preview_parents[preview_parent_index]))
 	queue_redraw()
+	coverage_changed.emit()
 
 func begin_rewire(node_id: int) -> void:
 	if not build_allowed or node_id <= 0 or not graph.nodes.has(node_id):
@@ -148,6 +233,7 @@ func begin_rewire(node_id: int) -> void:
 	rewire_mode = true
 	message_requested.emit("Tap a new parent node")
 	queue_redraw()
+	coverage_changed.emit()
 
 func sell_node(node_id: int) -> void:
 	if not build_allowed or node_id <= 0 or not graph.nodes.has(node_id):
@@ -165,6 +251,7 @@ func sell_node(node_id: int) -> void:
 	message_requested.emit("Recycled branch: +%d charge" % refund)
 	sfx_requested.emit(&"recycle")
 	queue_redraw()
+	coverage_changed.emit()
 
 func _collect_subtree_preview(node_id: int, output: Array[int]) -> void:
 	output.append(node_id)
@@ -582,8 +669,10 @@ func _handle_cell_tap(cell: Vector2i) -> void:
 			sfx_requested.emit(&"error")
 			return
 		if existing >= 0:
+			clear_tool()
 			selected_node_id = existing
 			node_selected.emit(existing)
+			coverage_changed.emit()
 			return
 		if not _is_buildable(cell):
 			message_requested.emit("That tissue cannot host a node")
@@ -606,6 +695,7 @@ func _handle_cell_tap(cell: Vector2i) -> void:
 			preview_parent_index = 0
 			message_requested.emit("Tap again to grow %s • %d charge" % [definitions[selected_tower]["name"], cost])
 			queue_redraw()
+			coverage_changed.emit()
 			return
 		var parent_id := preview_parents[preview_parent_index]
 		var new_id := graph.place_node(selected_tower, cell, parent_id)
@@ -618,11 +708,13 @@ func _handle_cell_tap(cell: Vector2i) -> void:
 			preview_parents.clear()
 			sfx_requested.emit(&"place")
 		queue_redraw()
+		coverage_changed.emit()
 		return
 	if existing >= 0:
 		selected_node_id = existing
 		node_selected.emit(existing)
 		queue_redraw()
+		coverage_changed.emit()
 
 func _filtered_parents(cell: Vector2i, tower_type: StringName) -> Array[int]:
 	var result: Array[int] = []
@@ -680,6 +772,8 @@ func _draw() -> void:
 	_draw_paths()
 	_draw_rift_zones()
 	_draw_links()
+	if coverage_enabled:
+		_draw_coverage_preview()
 	_draw_nodes()
 	_draw_enemies()
 	_draw_pulses()
@@ -741,6 +835,59 @@ func _draw_links() -> void:
 		var parent_id := preview_parents[preview_parent_index]
 		var color: Color = GameData.tower_definitions()[selected_tower]["color"]
 		draw_dashed_line(_node_position(parent_id), _cell_center(preview_cell), Color(color, 0.9), 3.0, 10.0)
+
+func _draw_coverage_preview() -> void:
+	var edge := _focused_edge()
+	if edge.is_empty():
+		return
+	var parent_id: int = edge["parent"]
+	var focus_start := _node_position(parent_id)
+	var focus_end := _cell_center(edge["cell"])
+	var route_id := parent_id
+	while route_id > 0:
+		var upstream_id: int = graph.nodes[route_id]["parent"]
+		_draw_route_edge(_node_position(upstream_id), _node_position(route_id), Color(0.38, 0.94, 0.82, 0.45))
+		route_id = upstream_id
+	if bool(edge["preview"]):
+		for child_id in graph.nodes[parent_id]["children"]:
+			_draw_route_subtree(child_id, Color(1.0, 0.72, 0.38, 0.55))
+	else:
+		_draw_descendants(int(edge["id"]))
+	_draw_route_edge(focus_start, focus_end, Color(1.0, 0.94, 0.62, 0.95))
+	_draw_lane_coverage(focus_start, focus_end, edge["type"], Color(1.0, 0.86, 0.42, 0.9))
+
+func _draw_descendants(node_id: int) -> void:
+	for child_id in graph.nodes[node_id]["children"]:
+		_draw_route_subtree(child_id, Color(0.38, 0.94, 0.82, 0.6))
+
+func _draw_route_subtree(node_id: int, color: Color) -> void:
+	var node: Dictionary = graph.nodes[node_id]
+	var start := _node_position(int(node["parent"]))
+	var finish := _node_position(node_id)
+	_draw_route_edge(start, finish, color)
+	_draw_lane_coverage(start, finish, node["type"], Color(color, 0.55))
+	for child_id in node["children"]:
+		_draw_route_subtree(child_id, color)
+
+func _draw_route_edge(start: Vector2, finish: Vector2, color: Color) -> void:
+	draw_line(start, finish, Color(color, color.a * 0.2), 15.0, true)
+	draw_line(start, finish, color, 3.0, true)
+
+func _draw_lane_coverage(start: Vector2, finish: Vector2, tower_type: StringName, color: Color) -> void:
+	if tower_type == &"relay":
+		return
+	var width := CELL_SIZE * LINK_WIDTH * float(graph.modifiers["link_width_mult"])
+	for lane in range(2):
+		var path := _path_for_lane(lane)
+		for index in range(path.size() - 1):
+			var a := _cell_center(path[index])
+			var b := _cell_center(path[index + 1])
+			var steps := maxi(1, ceili(a.distance_to(b) / 8.0))
+			for step in range(steps):
+				var p := a.lerp(b, float(step) / steps)
+				var q := a.lerp(b, float(step + 1) / steps)
+				if _distance_to_segment((p + q) * 0.5, start, finish) <= width:
+					draw_line(p, q, color, 11.0, true)
 
 func _draw_nodes() -> void:
 	var core := _node_position(0)

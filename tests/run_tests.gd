@@ -11,6 +11,7 @@ func _run_tests() -> void:
 	_test_content_catalog()
 	_test_art_catalog()
 	_test_graph_validation()
+	_test_coverage_preview()
 	_test_round_robin_routing()
 	_test_modifiers()
 	_test_gene_cards()
@@ -72,6 +73,44 @@ func _test_graph_validation() -> void:
 	_expect(graph.can_reparent(arc, 0) == false, "Arc outside Core reach must reject reparent")
 	var removed := graph.remove_subtree(relay)
 	_expect(removed.size() == 2 and graph.nodes.size() == 1, "Removing a branch must remove its descendants")
+
+func _test_coverage_preview() -> void:
+	var board := GameBoard.new()
+	board.configure(42, "normal")
+	var start := Vector2(5.5, 2.0) * GameBoard.CELL_SIZE
+	var finish := Vector2(7.5, 2.0) * GameBoard.CELL_SIZE
+	_expect(board._covered_lanes(start, finish, &"arc") == [false, false], "Default link width should miss the nearby top lane")
+	board.graph.modifiers["link_width_mult"] = 1.3
+	_expect(board._covered_lanes(start, finish, &"arc") == [true, false], "Wider links should cover the nearby top lane")
+	_expect(board._covered_lanes(start, finish, &"relay") == [false, false], "Relay links should have no effect coverage")
+	board.graph.modifiers["link_width_mult"] = 1.0
+	var relay := board.graph.place_node(&"relay", Vector2i(13, 1), 0)
+	var arc := board.graph.place_node(&"arc", Vector2i(11, 1), relay)
+	_expect(relay > 0 and arc > 0, "Coverage preview fixture should place nodes")
+	board.set_selected_tower(&"cryo")
+	board._handle_cell_tap(Vector2i(12, 0))
+	var preview := board.coverage_snapshot()
+	_expect(preview["warning"] and is_equal_approx(preview["interval"], 2.4), "Adding a relay child should warn and halve each branch cadence")
+	_expect(preview["rows"].size() == 2, "Placement preview should list existing and new child branches")
+	board.clear_tool()
+	_expect(board.coverage_snapshot().is_empty(), "Clearing a placement should clear its coverage preview")
+	board.set_selected_tower(&"arc")
+	board._handle_cell_tap(Vector2i(14, 0))
+	var relay_preview := board.coverage_snapshot()
+	board.cycle_preview_parent()
+	var core_preview := board.coverage_snapshot()
+	_expect(relay_preview["warning"] and not core_preview["warning"], "Cycling to a Core parent should remove the split warning")
+	_expect(is_equal_approx(core_preview["interval"], 1.2), "Core branches should receive every launch pulse")
+	board.set_coverage_enabled(false)
+	_expect(not board.coverage_enabled, "Coverage toggle should disable the visual preview")
+	board.clear_tool()
+	board._handle_cell_tap(Vector2i(11, 1))
+	_expect(not board.coverage_snapshot().is_empty(), "Selecting an existing node should show its route")
+	board.sell_node(arc)
+	_expect(board.coverage_snapshot().is_empty(), "Selling the selected node should clear its coverage preview")
+	board.configure(42, "normal", 3)
+	_expect(board._covered_lanes(board._cell_center(Vector2i(6, 1)), board._cell_center(Vector2i(6, 3)), &"arc") == [true, false], "Coverage should use the configured level's lane layout")
+	board.free()
 
 func _test_round_robin_routing() -> void:
 	var graph := NetworkGraph.new()

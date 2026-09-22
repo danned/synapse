@@ -30,6 +30,8 @@ var cycle_button: Button
 var rewire_button: Button
 var sell_button: Button
 var node_label: Label
+var coverage_button: Button
+var coverage_label: Label
 var tower_buttons: Dictionary = {}
 var countdown := -1.0
 var _last_countdown_second := -1
@@ -51,6 +53,7 @@ func setup(p_difficulty: String, p_seed: int, p_deck: Array, show_tutorial: bool
 	manifests = RunGenerator.generate_run(seed_value, level)
 	_build_ui()
 	board.configure(seed_value, difficulty, level, perks)
+	_update_coverage_readout()
 	_update_wave_preview()
 	_update_build_policy()
 	if show_tutorial:
@@ -75,6 +78,15 @@ func _build_ui() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top_row.add_child(spacer)
+	coverage_button = Button.new()
+	coverage_button.text = "COVERAGE ON"
+	coverage_button.toggle_mode = true
+	coverage_button.button_pressed = true
+	coverage_button.custom_minimum_size = Vector2(125, 44)
+	coverage_button.add_theme_font_size_override("font_size", 12)
+	coverage_button.tooltip_text = "Show link coverage and pulse cadence"
+	coverage_button.toggled.connect(_toggle_coverage)
+	top_row.add_child(coverage_button)
 	var seed_label := _hud_label("SEED %d" % seed_value, Color("7b9bb6"), 170)
 	seed_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	top_row.add_child(seed_label)
@@ -125,6 +137,7 @@ func _build_ui() -> void:
 	board.node_selected.connect(_on_node_selected)
 	board.message_requested.connect(_set_status)
 	board.sfx_requested.connect(_play_sound)
+	board.coverage_changed.connect(_update_coverage_readout)
 
 	var bottom := PanelContainer.new()
 	bottom.position = Vector2(8, 604)
@@ -192,12 +205,44 @@ func _build_ui() -> void:
 	pause_button.visible = difficulty == "easy"
 	pause_button.pressed.connect(_toggle_tactical_pause)
 	controls.add_child(pause_button)
+	coverage_label = Label.new()
+	coverage_label.custom_minimum_size = Vector2(250, 72)
+	coverage_label.add_theme_font_size_override("font_size", 11)
+	coverage_label.add_theme_color_override("font_color", Color("d8edff"))
+	coverage_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	coverage_label.tooltip_text = "Intervals estimate ordinary routing; mutations may add pulses."
+	row.add_child(coverage_label)
 	start_button = Button.new()
 	start_button.text = "LAUNCH\nWAVE 1"
 	start_button.custom_minimum_size = Vector2(132, 72)
 	start_button.add_theme_font_size_override("font_size", 14)
 	start_button.pressed.connect(_launch_next_wave)
 	row.add_child(start_button)
+
+func _toggle_coverage(enabled: bool) -> void:
+	board.set_coverage_enabled(enabled)
+	coverage_button.text = "COVERAGE ON" if enabled else "COVERAGE OFF"
+
+func _update_coverage_readout() -> void:
+	if not board.coverage_enabled:
+		coverage_label.text = ""
+		return
+	var snapshot := board.coverage_snapshot()
+	if snapshot.is_empty():
+		coverage_label.text = "Select a node or preview a link\nto inspect coverage and cadence."
+		return
+	var lanes: Array[bool] = snapshot["lanes"]
+	var lane_text := "▲ TOP" if lanes[0] else ""
+	if lanes[1]:
+		lane_text += " + ▼ BOTTOM" if not lane_text.is_empty() else "▼ BOTTOM"
+	if lane_text.is_empty():
+		lane_text = "NO LINK COVERAGE"
+	var lines: Array[String] = ["%s  ~%.1fs  %s" % [snapshot["title"], snapshot["interval"], lane_text]]
+	if snapshot["warning"]:
+		lines.append("SPLIT: existing branches pulse slower")
+	for row_text in snapshot["rows"]:
+		lines.append(row_text)
+	coverage_label.text = "\n".join(lines)
 
 func _hud_label(text_value: String, color: Color, width: float) -> Label:
 	var label := Label.new()
