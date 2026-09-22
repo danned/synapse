@@ -9,6 +9,7 @@ func _init() -> void:
 func _run_tests() -> void:
 	print("SYNAPSE test suite")
 	_test_content_catalog()
+	_test_art_catalog()
 	_test_graph_validation()
 	_test_round_robin_routing()
 	_test_modifiers()
@@ -47,6 +48,18 @@ func _test_content_catalog() -> void:
 	_expect(GameData.BASE_CARD_IDS.size() == 8, "Starting deck must contain eight cards")
 	for id in GameData.GENE_CARD_IDS:
 		_expect(GameData.card_definitions().has(id) and not GameData.card_modifier(id).is_empty(), "Gene card must have a definition and effect: %s" % id)
+
+func _test_art_catalog() -> void:
+	var towers := GameData.tower_definitions()
+	var enemies := GameData.enemy_definitions()
+	_expect(GameArt.TOWER_ICONS.size() == towers.size(), "Every tower must have an art entry")
+	_expect(GameArt.ENEMY_ICONS.size() == enemies.size(), "Every enemy must have an art entry")
+	for type in towers:
+		var texture := GameArt.tower_icon(type)
+		_expect(texture != null and texture.get_size().x > 0, "Tower %s must load its icon" % type)
+	for type in enemies:
+		var texture := GameArt.enemy_icon(type)
+		_expect(texture != null and texture.get_size().x > 0, "Enemy %s must load its icon" % type)
 
 func _test_graph_validation() -> void:
 	var graph := NetworkGraph.new()

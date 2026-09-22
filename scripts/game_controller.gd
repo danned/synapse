@@ -20,6 +20,8 @@ var integrity_label: Label
 var wave_label: Label
 var mode_label: Label
 var intel_label: Label
+var intel_types: VBoxContainer
+var intel_meta_label: Label
 var status_label: Label
 var start_button: Button
 var pause_button: Button
@@ -95,9 +97,16 @@ func _build_ui() -> void:
 	intel_column.add_child(intel_title)
 	intel_label = Label.new()
 	intel_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	intel_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	intel_label.add_theme_font_size_override("font_size", 13)
 	intel_column.add_child(intel_label)
+	intel_types = VBoxContainer.new()
+	intel_types.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	intel_types.add_theme_constant_override("separation", 5)
+	intel_column.add_child(intel_types)
+	intel_meta_label = Label.new()
+	intel_meta_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	intel_meta_label.add_theme_font_size_override("font_size", 13)
+	intel_column.add_child(intel_meta_label)
 	var legend := Label.new()
 	legend.text = "▲ TOP LANE\n▼ BOTTOM\n\nPulses route\nfrom the Core."
 	legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -127,6 +136,9 @@ func _build_ui() -> void:
 		var definition: Dictionary = GameData.tower_definitions()[type]
 		var button := Button.new()
 		button.text = "%s  •  %d\n%s" % [definition["name"], definition["cost"], str(definition["tagline"]).to_upper()]
+		button.icon = GameArt.tower_icon(type)
+		button.add_theme_constant_override("icon_max_width", 32)
+		button.expand_icon = true
 		button.custom_minimum_size = Vector2(145, 72)
 		button.add_theme_font_size_override("font_size", 14)
 		button.tooltip_text = definition["description"]
@@ -385,29 +397,49 @@ func _ensure_next_manifest() -> void:
 
 func _update_wave_preview() -> void:
 	_ensure_next_manifest()
+	for child in intel_types.get_children():
+		intel_types.remove_child(child)
+		child.queue_free()
 	if next_wave_index >= manifests.size():
 		intel_label.text = "NO FURTHER\nSIGNALS"
+		intel_meta_label.text = ""
 		return
 	var manifest := manifests[next_wave_index]
 	var summary := RunGenerator.summarize(manifest)
 	var definitions := GameData.enemy_definitions()
+	intel_label.text = "WAVE %d" % (next_wave_index + 1)
 	match difficulty:
 		"easy":
-			var lines: Array[String] = ["WAVE %d" % (next_wave_index + 1), ""]
 			for type in summary["counts"]:
-				lines.append("%s ×%d" % [definitions[type]["name"], summary["counts"][type]])
-			lines.append("")
-			lines.append("▲ %d  ▼ %d" % [summary["lanes"][0], summary["lanes"][1]])
-			intel_label.text = "\n".join(lines)
+				_add_intel_type_row(type, "%s ×%d" % [definitions[type]["name"], summary["counts"][type]])
+			intel_meta_label.text = "▲ %d  ▼ %d" % [summary["lanes"][0], summary["lanes"][1]]
 		"normal", "endless":
-			var names: Array[String] = []
-			for type in summary["counts"]: names.append(definitions[type]["name"])
+			for type in summary["counts"]:
+				_add_intel_type_row(type, definitions[type]["name"])
 			var top_word := _threat_word(int(summary["lanes"][0]))
 			var bottom_word := _threat_word(int(summary["lanes"][1]))
-			intel_label.text = "WAVE %d\n\n%s\n\n▲ %s\n▼ %s" % [next_wave_index + 1, "\n".join(names), top_word, bottom_word]
+			intel_meta_label.text = "▲ %s\n▼ %s" % [top_word, bottom_word]
 		_:
 			var boss_warning := "\n\nBOSS SIGNAL" if next_wave_index == 9 else ""
-			intel_label.text = "WAVE %d\n\nTHREAT\n%s%s" % [next_wave_index + 1, _threat_word(int(summary["total"])), boss_warning]
+			intel_meta_label.text = "THREAT\n%s%s" % [_threat_word(int(summary["total"])), boss_warning]
+
+func _add_intel_type_row(type: StringName, row_text: String) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	intel_types.add_child(row)
+	var icon := TextureRect.new()
+	icon.texture = GameArt.enemy_icon(type)
+	icon.modulate = GameData.enemy_definitions()[type]["color"]
+	icon.custom_minimum_size = Vector2(18, 18)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	row.add_child(icon)
+	var label := Label.new()
+	label.text = row_text
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_font_size_override("font_size", 12)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(label)
 
 func _threat_word(count: int) -> String:
 	if count <= 5: return "LOW"

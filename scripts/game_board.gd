@@ -756,21 +756,8 @@ func _draw_nodes() -> void:
 			draw_circle(pos, 29, Color(1, 1, 1, 0.22))
 		draw_circle(pos, 22, Color(color, 0.2))
 		draw_circle(pos, 16, Color("0b1829"))
-		match node["type"]:
-			&"relay":
-				for spoke in range(3):
-					var d := Vector2.UP.rotated(spoke * TAU / 3.0)
-					draw_circle(pos + d * 10, 4, color)
-			&"arc":
-				draw_polyline(PackedVector2Array([pos + Vector2(-9, 7), pos + Vector2(-2, -8), pos + Vector2(3, 2), pos + Vector2(9, -7)]), color, 3.0)
-			&"cryo":
-				for spoke in range(6): draw_line(pos, pos + Vector2.UP.rotated(spoke * TAU / 6.0) * 11, color, 2)
-			&"lance":
-				var parent := _node_position(int(node["parent"]))
-				var direction := (pos - parent).normalized()
-				draw_line(pos - direction * 10, pos + direction * 12, color, 5)
-			&"mortar": draw_circle(pos, 8, color)
-			&"rift": draw_arc(pos, 10, 0, TAU, 20, color, 3)
+		var icon := GameArt.tower_icon(node["type"])
+		draw_texture_rect(icon, Rect2(pos - Vector2(14, 14), Vector2(28, 28)), false, color)
 
 func _draw_enemies() -> void:
 	var font := ThemeDB.fallback_font
@@ -779,10 +766,13 @@ func _draw_enemies() -> void:
 		var definition: Dictionary = GameData.enemy_definitions()[enemy["type"]]
 		var radius := 22.0 if enemy["type"] == &"severer" else (14.0 if enemy["type"] == &"husk" else 10.0)
 		draw_circle(pos, radius + 4, Color(0, 0, 0, 0.45))
-		draw_circle(pos, radius, definition["color"])
+		var icon_size := 48.0 if enemy["type"] == &"severer" else (32.0 if enemy["type"] == &"husk" else 26.0)
+		var icon := GameArt.enemy_icon(enemy["type"])
+		var icon_color: Color = definition["color"]
+		if enemy["type"] == &"phase":
+			icon_color.a = 0.76
+		draw_texture_rect(icon, Rect2(pos - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false, icon_color)
 		if enemy["type"] == &"phase": draw_arc(pos, radius + 5, 0, TAU, 18, Color("6fdcff"), 2)
-		if enemy["type"] == &"leech" or enemy["type"] == &"severer":
-			draw_line(pos - Vector2(radius * 0.6, 0), pos + Vector2(radius * 0.6, 0), Color("071022"), 3)
 		var ratio := clampf(float(enemy["hp"]) / float(enemy["max_hp"]), 0.0, 1.0)
 		draw_rect(Rect2(pos + Vector2(-radius, -radius - 9), Vector2(radius * 2, 4)), Color("351729"))
 		draw_rect(Rect2(pos + Vector2(-radius, -radius - 9), Vector2(radius * 2 * ratio, 4)), Color("62f4d2"))

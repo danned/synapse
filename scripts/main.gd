@@ -64,6 +64,9 @@ func _show_main_menu() -> void:
 	var guide := _menu_button("HOW TO PLAY", Color("33c8ff"))
 	guide.pressed.connect(_show_how_to_play)
 	column.add_child(guide)
+	var credits := _menu_button("ART CREDITS", Color("ffca65"))
+	credits.pressed.connect(_show_art_credits)
+	column.add_child(credits)
 	var settings := _menu_button("AUDIO SETTINGS", Color("7b9bb6"))
 	settings.pressed.connect(_show_audio_settings)
 	column.add_child(settings)
@@ -509,6 +512,21 @@ func _show_how_to_play() -> void:
 	guide.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	guide.add_theme_font_size_override("font_size", 18)
 	body.add_child(guide)
+	_add_back_button(body, _show_main_menu)
+
+func _show_art_credits() -> void:
+	_clear_content()
+	var shell := _page_shell("ART CREDITS", "Tower and enemy icons by Lorc, via Game-icons.net.")
+	var body: VBoxContainer = shell["body"]
+	var credits := RichTextLabel.new()
+	credits.bbcode_enabled = true
+	credits.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	credits.add_theme_font_size_override("normal_font_size", 19)
+	credits.text = "All icons are licensed under [url=https://creativecommons.org/licenses/by/3.0/]CC BY 3.0[/url] and tinted for SYNAPSE.\n\n" \
+		+ "TOWERS\n[url=https://game-icons.net/1x1/lorc/triorb.html]Triorb[/url] • [url=https://game-icons.net/1x1/lorc/lightning-arc.html]Lightning arc[/url] • [url=https://game-icons.net/1x1/lorc/frozen-orb.html]Frozen orb[/url] • [url=https://game-icons.net/1x1/lorc/laser-blast.html]Laser blast[/url] • [url=https://game-icons.net/1x1/lorc/cannon-shot.html]Cannon shot[/url] • [url=https://game-icons.net/1x1/lorc/vortex.html]Vortex[/url]\n\n" \
+		+ "ENEMIES\n[url=https://game-icons.net/1x1/lorc/angular-spider.html]Angular spider[/url] • [url=https://game-icons.net/1x1/lorc/mite.html]Mite[/url] • [url=https://game-icons.net/1x1/lorc/beetle-shell.html]Beetle shell[/url] • [url=https://game-icons.net/1x1/lorc/spectre.html]Spectre[/url] • [url=https://game-icons.net/1x1/lorc/lamprey-mouth.html]Lamprey mouth[/url] • [url=https://game-icons.net/1x1/lorc/alien-stare.html]Alien stare[/url] • [url=https://game-icons.net/1x1/lorc/two-shadows.html]Two shadows[/url] • [url=https://game-icons.net/1x1/lorc/lightning-tree.html]Lightning tree[/url]"
+	credits.meta_clicked.connect(func(url: Variant): OS.shell_open(str(url)))
+	body.add_child(credits)
 	_add_back_button(body, _show_main_menu)
 
 func _page_shell(title_text: String, subtitle_text: String) -> Dictionary:
