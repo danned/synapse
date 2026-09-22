@@ -245,6 +245,8 @@ func _launch_next_wave() -> void:
 	pause_button.text = "PAUSE"
 	var manifest := manifests[next_wave_index]
 	board.start_wave(manifest)
+	if is_instance_valid(sound_manager):
+		sound_manager.play_music(&"boss" if next_wave_index == 9 else &"combat")
 	next_wave_index += 1
 	start_button.disabled = true
 	start_button.text = "WAVE ACTIVE"
@@ -254,6 +256,8 @@ func _launch_next_wave() -> void:
 	_set_status("Signals live • watch the routing cadence")
 
 func _on_wave_finished() -> void:
+	if is_instance_valid(sound_manager):
+		sound_manager.play_music(&"ambient")
 	if _run_over:
 		return
 	if next_wave_index >= GameData.MAX_WAVES:
@@ -265,6 +269,8 @@ func _on_wave_finished() -> void:
 		_enter_intermission()
 
 func _enter_intermission() -> void:
+	if is_instance_valid(sound_manager):
+		sound_manager.play_music(&"ambient")
 	_update_wave_preview()
 	_update_build_policy()
 	if difficulty == "hardcore":
@@ -280,6 +286,8 @@ func _on_run_failed(wave_reached: int) -> void:
 	_finish_run(false, wave_reached)
 
 func _finish_run(victory: bool, wave_reached: int = -1) -> void:
+	if is_instance_valid(sound_manager):
+		sound_manager.play_music(&"ambient")
 	_run_over = true
 	board.set_process(false)
 	var reached := GameData.MAX_WAVES if victory else (wave_reached if wave_reached >= 0 else next_wave_index)
@@ -426,6 +434,6 @@ func _on_integrity_changed(value: int) -> void:
 func _set_status(text: String) -> void:
 	status_label.text = text
 
-func _play_sound(frequency: float) -> void:
+func _play_sound(event: StringName) -> void:
 	if is_instance_valid(sound_manager):
-		sound_manager.play_tone(frequency)
+		sound_manager.play_sfx(event)

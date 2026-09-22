@@ -7,7 +7,7 @@ signal wave_finished
 signal run_failed(wave_reached: int)
 signal node_selected(node_id: int)
 signal message_requested(text: String)
-signal sfx_requested(frequency: float)
+signal sfx_requested(event: StringName)
 
 const CELL_SIZE := 64.0
 const LINK_WIDTH := 0.42
@@ -112,7 +112,7 @@ func start_wave(manifest: Dictionary) -> void:
 	_finish_delay = -1.0
 	graph.reset_routing()
 	resonance_hits.clear()
-	sfx_requested.emit(240.0)
+	sfx_requested.emit(&"launch")
 	queue_redraw()
 
 func cycle_preview_parent() -> void:
@@ -145,7 +145,7 @@ func sell_node(node_id: int) -> void:
 	selected_node_id = -1
 	charge_changed.emit(charge)
 	message_requested.emit("Recycled branch: +%d charge" % refund)
-	sfx_requested.emit(150.0)
+	sfx_requested.emit(&"recycle")
 	queue_redraw()
 
 func _collect_subtree_preview(node_id: int, output: Array[int]) -> void:
@@ -156,7 +156,7 @@ func _collect_subtree_preview(node_id: int, output: Array[int]) -> void:
 func apply_card(card_id: String) -> void:
 	graph.apply_modifier(card_id)
 	message_requested.emit("Mutation integrated: %s" % GameData.card_definitions()[card_id]["name"])
-	sfx_requested.emit(520.0)
+	sfx_requested.emit(&"draft")
 	queue_redraw()
 
 func _process(delta: float) -> void:
@@ -219,7 +219,7 @@ func _update_enemies(delta: float) -> void:
 		effects.append({"type": "burst", "position": _cell_center(GameData.CORE_CELL), "ttl": 0.5, "color": Color("ff397c")})
 		enemies.remove_at(index)
 		integrity_changed.emit(maxi(0, integrity))
-		sfx_requested.emit(95.0)
+		sfx_requested.emit(&"leak")
 		if integrity <= 0:
 			wave_active = false
 			run_failed.emit(current_wave)
@@ -338,7 +338,7 @@ func _fire_arc(node_id: int) -> void:
 		var target_position: Vector2 = enemies[index]["position"]
 		_damage_enemy(index, 9.0, false)
 		effects.append({"type": "line", "from": _node_position(node_id), "to": target_position, "ttl": 0.18, "color": Color("33c8ff")})
-	if not targets.is_empty(): sfx_requested.emit(680.0)
+	if not targets.is_empty(): sfx_requested.emit(&"arc")
 
 func _fire_cryo(node_id: int) -> void:
 	var targets := _targets_in_range(_node_position(node_id), 2.6 + float(graph.modifiers["tower_range_bonus"]), 1)
@@ -352,7 +352,7 @@ func _fire_cryo(node_id: int) -> void:
 	enemies[index] = enemy
 	_damage_enemy(index, 6.0, false)
 	effects.append({"type": "burst", "position": enemy["position"], "ttl": 0.35, "color": Color("9c82ff")})
-	sfx_requested.emit(420.0)
+	sfx_requested.emit(&"cryo")
 
 func _fire_lance(node_id: int) -> void:
 	var node: Dictionary = graph.nodes[node_id]
@@ -363,7 +363,7 @@ func _fire_lance(node_id: int) -> void:
 	_fire_lance_segment(node_position, node_position + direction * beam_range * CELL_SIZE)
 	if bool(graph.modifiers["bidirectional_lance"]):
 		_fire_lance_segment(node_position, node_position - direction * beam_range * CELL_SIZE)
-	sfx_requested.emit(880.0)
+	sfx_requested.emit(&"lance")
 
 func _fire_lance_segment(start: Vector2, finish: Vector2) -> void:
 	for index in range(enemies.size() - 1, -1, -1):
@@ -401,7 +401,7 @@ func _damage_enemy(index: int, raw_amount: float, from_link: bool) -> void:
 		charge_changed.emit(charge)
 		effects.append({"type": "burst", "position": enemy["position"], "ttl": 0.4, "color": definition["color"]})
 		enemies.remove_at(index)
-		sfx_requested.emit(300.0)
+		sfx_requested.emit(&"enemy_down")
 	else:
 		enemies[index] = enemy
 
@@ -419,7 +419,7 @@ func _try_disable_link(enemy: Dictionary) -> void:
 			enemy["disable_cooldown"] = world_time + (3.5 if enemy["type"] == &"severer" else 999.0)
 			effects.append({"type": "burst", "position": enemy["position"], "ttl": 0.45, "color": Color("68ff9b")})
 			message_requested.emit("LINK SEVERED")
-			sfx_requested.emit(115.0)
+			sfx_requested.emit(&"sever")
 			return
 
 func _apply_cross_synapses() -> void:
@@ -454,7 +454,7 @@ func _check_wave_complete(delta: float) -> void:
 		charge += 35 + current_wave * 5
 		charge_changed.emit(charge)
 		wave_finished.emit()
-		sfx_requested.emit(560.0)
+		sfx_requested.emit(&"wave_complete")
 
 func _update_effects(delta: float) -> void:
 	for index in range(effects.size() - 1, -1, -1):
@@ -497,14 +497,16 @@ func _handle_cell_tap(cell: Vector2i) -> void:
 		if existing >= 0 and graph.reparent(selected_node_id, existing):
 			rewire_mode = false
 			message_requested.emit("Branch rerouted")
-			sfx_requested.emit(360.0)
+			sfx_requested.emit(&"rewire")
 		else:
 			message_requested.emit("Invalid parent: check reach, ports, and cycles")
+			sfx_requested.emit(&"error")
 		queue_redraw()
 		return
 	if not selected_tower.is_empty():
 		if not build_allowed:
 			message_requested.emit("Construction is locked during this wave")
+			sfx_requested.emit(&"error")
 			return
 		if existing >= 0:
 			selected_node_id = existing
@@ -512,15 +514,18 @@ func _handle_cell_tap(cell: Vector2i) -> void:
 			return
 		if not _is_buildable(cell):
 			message_requested.emit("That tissue cannot host a node")
+			sfx_requested.emit(&"error")
 			return
 		var definitions := GameData.tower_definitions()
 		var cost: int = definitions[selected_tower]["cost"]
 		if charge < cost:
 			message_requested.emit("Insufficient charge")
+			sfx_requested.emit(&"error")
 			return
 		var parents := _filtered_parents(cell, selected_tower)
 		if parents.is_empty():
 			message_requested.emit("No powered parent in range")
+			sfx_requested.emit(&"error")
 			return
 		if preview_cell != cell:
 			preview_cell = cell
@@ -538,7 +543,7 @@ func _handle_cell_tap(cell: Vector2i) -> void:
 			node_selected.emit(new_id)
 			preview_cell = Vector2i(-1, -1)
 			preview_parents.clear()
-			sfx_requested.emit(460.0)
+			sfx_requested.emit(&"place")
 		queue_redraw()
 		return
 	if existing >= 0:

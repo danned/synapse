@@ -15,7 +15,8 @@ func _ready() -> void:
 	sound_manager = SoundManager.new()
 	add_child(sound_manager)
 	save_data = SaveService.load_data()
-	sound_manager.volume = float(save_data["sound_volume"])
+	sound_manager.set_sound_volume(float(save_data["sound_volume"]))
+	sound_manager.set_music_volume(float(save_data["music_volume"]))
 	purchase_provider.purchase_completed.connect(_on_debug_purchase_completed)
 	purchase_provider.purchase_failed.connect(_show_notice)
 	purchase_provider.restore_completed.connect(_on_restore_completed)
@@ -29,6 +30,7 @@ func _clear_content() -> void:
 	add_child(content_root)
 
 func _show_main_menu() -> void:
+	sound_manager.play_music(&"ambient")
 	_clear_content()
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -61,12 +63,44 @@ func _show_main_menu() -> void:
 	var guide := _menu_button("HOW TO PLAY", Color("33c8ff"))
 	guide.pressed.connect(_show_how_to_play)
 	column.add_child(guide)
+	var settings := _menu_button("AUDIO SETTINGS", Color("7b9bb6"))
+	settings.pressed.connect(_show_audio_settings)
+	column.add_child(settings)
 	var footer := Label.new()
 	footer.text = "Mobile-first vertical slice  •  Mouse + touch  •  Local progression"
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	footer.add_theme_color_override("font_color", Color("526f87"))
 	footer.add_theme_font_size_override("font_size", 13)
 	column.add_child(footer)
+
+func _show_audio_settings() -> void:
+	_clear_content()
+	var shell := _page_shell("AUDIO SETTINGS", "Set music and sound effect levels.")
+	var body: VBoxContainer = shell["body"]
+	_add_volume_slider(body, "MUSIC", "music_volume")
+	_add_volume_slider(body, "SOUND EFFECTS", "sound_volume")
+	_add_back_button(body, _show_main_menu)
+
+func _add_volume_slider(parent: VBoxContainer, label_text: String, save_key: String) -> void:
+	var label := Label.new()
+	label.text = "%s  %d%%" % [label_text, roundi(float(save_data[save_key]) * 100.0)]
+	parent.add_child(label)
+	var slider := HSlider.new()
+	slider.min_value = 0.0
+	slider.max_value = 1.0
+	slider.step = 0.05
+	slider.value = float(save_data[save_key])
+	slider.custom_minimum_size = Vector2(0, 48)
+	slider.value_changed.connect(func(value: float):
+		save_data[save_key] = value
+		label.text = "%s  %d%%" % [label_text, roundi(value * 100.0)]
+		if save_key == "music_volume":
+			sound_manager.set_music_volume(value)
+		else:
+			sound_manager.set_sound_volume(value)
+		SaveService.save_data(save_data)
+	)
+	parent.add_child(slider)
 
 func _show_difficulty_select() -> void:
 	_clear_content()
@@ -122,6 +156,7 @@ func _start_new_run(difficulty_id: String, requested_seed: int) -> void:
 	game.run_ended.connect(_on_run_ended)
 	game.tutorial_completed.connect(_on_tutorial_completed)
 	game.setup(difficulty_id, seed_to_use, save_data["deck"], not bool(save_data["tutorial_seen"]))
+	sound_manager.play_music(&"ambient")
 
 func _on_tutorial_completed() -> void:
 	save_data["tutorial_seen"] = true
@@ -138,6 +173,9 @@ func _on_run_ended(wave_reached: int, victory: bool, difficulty_id: String, seed
 	_show_results(wave_reached, victory, difficulty_id, seed_value, reward)
 
 func _show_results(wave_reached: int, victory: bool, difficulty_id: String, seed_value: int, reward: int) -> void:
+	sound_manager.play_music(&"ambient")
+	if victory:
+		sound_manager.play_sfx(&"victory")
 	_clear_content()
 	var shell := _page_shell("CORE STABLE" if victory else "CORE COLLAPSED", "The network survived." if victory else "The pattern failed. Rebuild the geometry.")
 	var body: VBoxContainer = shell["body"]
@@ -294,7 +332,7 @@ func _unlock_advanced_pack() -> void:
 	if "advanced_network_pack" not in save_data["owned_packs"]:
 		save_data["owned_packs"].append("advanced_network_pack")
 	SaveService.save_data(save_data)
-	sound_manager.play_tone(720.0, 0.18, 0.3)
+	sound_manager.play_sfx(&"unlock")
 
 func _on_restore_completed(products: Array[String]) -> void:
 	_show_notice("Restored %d debug entitlement(s)" % products.size())
@@ -343,6 +381,7 @@ func _menu_button(text_value: String, accent: Color) -> Button:
 	button.text = text_value
 	button.custom_minimum_size = Vector2(0, 58)
 	button.add_theme_color_override("font_hover_color", accent)
+	button.pressed.connect(func(): sound_manager.play_sfx(&"click"))
 	return button
 
 func _add_back_button(parent: VBoxContainer, callback: Callable, text_value: String = "BACK") -> void:
@@ -350,6 +389,7 @@ func _add_back_button(parent: VBoxContainer, callback: Callable, text_value: Str
 	button.text = text_value
 	button.custom_minimum_size = Vector2(0, 50)
 	button.pressed.connect(callback)
+	button.pressed.connect(func(): sound_manager.play_sfx(&"click"))
 	parent.add_child(button)
 
 func _vertical_gap(height: float) -> Control:
