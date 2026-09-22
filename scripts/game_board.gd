@@ -1,0 +1,724 @@
+class_name GameBoard
+extends Control
+
+signal charge_changed(value: int)
+signal integrity_changed(value: int)
+signal wave_finished
+signal run_failed(wave_reached: int)
+signal node_selected(node_id: int)
+signal message_requested(text: String)
+signal sfx_requested(frequency: float)
+
+const CELL_SIZE := 64.0
+const LINK_WIDTH := 0.42
+
+var graph := NetworkGraph.new()
+var charge := GameData.STARTING_CHARGE
+var integrity := GameData.STARTING_INTEGRITY
+var current_wave := 0
+var difficulty := "normal"
+var run_seed := 0
+
+var selected_tower: StringName = &""
+var selected_node_id := -1
+var preview_cell := Vector2i(-1, -1)
+var preview_parents: Array[int] = []
+var preview_parent_index := 0
+var rewire_mode := false
+var build_allowed := true
+var combat_paused := false
+var wave_active := false
+
+var enemies: Array[Dictionary] = []
+var pulses: Array[Dictionary] = []
+var effects: Array[Dictionary] = []
+var spawn_entries: Array[Dictionary] = []
+var spawn_index := 0
+var wave_time := 0.0
+var world_time := 0.0
+var pulse_timer := 0.0
+var next_enemy_id := 1
+var next_pulse_id := 1
+var disabled_links: Dictionary = {}
+var resonance_hits: Dictionary = {}
+var _finish_delay := -1.0
+
+var top_path: Array[Vector2i] = [
+	Vector2i(0, 1), Vector2i(1, 1), Vector2i(2, 1), Vector2i(3, 1),
+	Vector2i(4, 1), Vector2i(4, 2), Vector2i(5, 2), Vector2i(6, 2),
+	Vector2i(7, 2), Vector2i(8, 2), Vector2i(8, 3), Vector2i(9, 3),
+	Vector2i(10, 3), Vector2i(11, 3), Vector2i(12, 3), Vector2i(13, 3),
+	Vector2i(14, 3), Vector2i(15, 3)
+]
+var bottom_path: Array[Vector2i] = [
+	Vector2i(0, 6), Vector2i(1, 6), Vector2i(2, 6), Vector2i(3, 6),
+	Vector2i(4, 6), Vector2i(4, 5), Vector2i(5, 5), Vector2i(6, 5),
+	Vector2i(7, 5), Vector2i(8, 5), Vector2i(8, 4), Vector2i(9, 4),
+	Vector2i(10, 4), Vector2i(11, 4), Vector2i(12, 4), Vector2i(12, 3),
+	Vector2i(13, 3), Vector2i(14, 3), Vector2i(15, 3)
+]
+var blocked_cells: Array[Vector2i] = [
+	Vector2i(6, 0), Vector2i(10, 1), Vector2i(6, 7), Vector2i(10, 6)
+]
+
+func _ready() -> void:
+	custom_minimum_size = Vector2(GameData.BOARD_COLUMNS * CELL_SIZE, GameData.BOARD_ROWS * CELL_SIZE)
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	set_process(true)
+	queue_redraw()
+
+func configure(seed_value: int, difficulty_id: String) -> void:
+	run_seed = seed_value
+	difficulty = difficulty_id
+	charge = GameData.STARTING_CHARGE
+	integrity = GameData.STARTING_INTEGRITY
+	graph = NetworkGraph.new()
+	charge_changed.emit(charge)
+	integrity_changed.emit(integrity)
+	queue_redraw()
+
+func set_selected_tower(type: StringName) -> void:
+	selected_tower = type
+	selected_node_id = -1
+	rewire_mode = false
+	preview_cell = Vector2i(-1, -1)
+	preview_parents.clear()
+	queue_redraw()
+
+func clear_tool() -> void:
+	selected_tower = &""
+	rewire_mode = false
+	preview_cell = Vector2i(-1, -1)
+	preview_parents.clear()
+	queue_redraw()
+
+func set_build_allowed(value: bool) -> void:
+	build_allowed = value
+	if not value:
+		clear_tool()
+	queue_redraw()
+
+func set_combat_paused(value: bool) -> void:
+	combat_paused = value
+	queue_redraw()
+
+func start_wave(manifest: Dictionary) -> void:
+	current_wave = int(manifest["wave"])
+	spawn_entries = manifest["entries"].duplicate(true)
+	spawn_index = 0
+	wave_time = 0.0
+	pulse_timer = 0.0
+	wave_active = true
+	_finish_delay = -1.0
+	graph.reset_routing()
+	resonance_hits.clear()
+	sfx_requested.emit(240.0)
+	queue_redraw()
+
+func cycle_preview_parent() -> void:
+	if preview_parents.size() <= 1:
+		return
+	preview_parent_index = (preview_parent_index + 1) % preview_parents.size()
+	message_requested.emit("Connection source: %s" % _node_name(preview_parents[preview_parent_index]))
+	queue_redraw()
+
+func begin_rewire(node_id: int) -> void:
+	if not build_allowed or node_id <= 0 or not graph.nodes.has(node_id):
+		return
+	selected_tower = &""
+	selected_node_id = node_id
+	rewire_mode = true
+	message_requested.emit("Tap a new parent node")
+	queue_redraw()
+
+func sell_node(node_id: int) -> void:
+	if not build_allowed or node_id <= 0 or not graph.nodes.has(node_id):
+		return
+	var subtree: Array[int] = []
+	_collect_subtree_preview(node_id, subtree)
+	var refund := 0
+	var towers := GameData.tower_definitions()
+	for id in subtree:
+		refund += int(round(float(towers[graph.nodes[id]["type"]]["cost"]) * 0.75))
+	graph.remove_subtree(node_id)
+	charge += refund
+	selected_node_id = -1
+	charge_changed.emit(charge)
+	message_requested.emit("Recycled branch: +%d charge" % refund)
+	sfx_requested.emit(150.0)
+	queue_redraw()
+
+func _collect_subtree_preview(node_id: int, output: Array[int]) -> void:
+	output.append(node_id)
+	for child_id in graph.nodes[node_id]["children"]:
+		_collect_subtree_preview(child_id, output)
+
+func apply_card(card_id: String) -> void:
+	graph.apply_modifier(card_id)
+	message_requested.emit("Mutation integrated: %s" % GameData.card_definitions()[card_id]["name"])
+	sfx_requested.emit(520.0)
+	queue_redraw()
+
+func _process(delta: float) -> void:
+	if combat_paused:
+		queue_redraw()
+		return
+	world_time += delta
+	_update_effects(delta)
+	if wave_active:
+		wave_time += delta
+		pulse_timer -= delta
+		if pulse_timer <= 0.0:
+			pulse_timer += 1.2
+			_emit_core_pulses()
+		_spawn_ready_enemies()
+		_update_enemies(delta)
+		_update_pulses(delta)
+		_prune_disabled_links()
+		_check_wave_complete(delta)
+	queue_redraw()
+
+func _spawn_ready_enemies() -> void:
+	while spawn_index < spawn_entries.size() and float(spawn_entries[spawn_index]["time"]) <= wave_time:
+		var entry: Dictionary = spawn_entries[spawn_index]
+		_spawn_enemy(entry["type"], int(entry["lane"]))
+		spawn_index += 1
+
+func _spawn_enemy(type: StringName, lane: int) -> void:
+	var definition: Dictionary = GameData.enemy_definitions()[type]
+	var enemy := {
+		"id": next_enemy_id, "type": type, "lane": lane,
+		"segment": 0, "segment_t": 0.0, "position": _cell_center(_path_for_lane(lane)[0]),
+		"hp": float(definition["hp"]), "max_hp": float(definition["hp"]),
+		"slow_until": 0.0, "slow_factor": 1.0, "root_until": 0.0,
+		"marked_until": 0.0, "disable_cooldown": 0.0
+	}
+	next_enemy_id += 1
+	enemies.append(enemy)
+
+func _update_enemies(delta: float) -> void:
+	var leaked: Array[int] = []
+	for index in range(enemies.size()):
+		var enemy: Dictionary = enemies[index]
+		if world_time >= float(enemy["root_until"]):
+			var definition: Dictionary = GameData.enemy_definitions()[enemy["type"]]
+			var speed := float(definition["speed"])
+			if world_time < float(enemy["slow_until"]):
+				speed *= float(enemy["slow_factor"])
+			_advance_enemy(enemy, speed * delta)
+		enemy["position"] = _enemy_position(enemy)
+		if enemy["type"] == &"leech" or enemy["type"] == &"severer":
+			_try_disable_link(enemy)
+		if int(enemy["segment"]) >= _path_for_lane(int(enemy["lane"])).size() - 1:
+			leaked.append(index)
+		enemies[index] = enemy
+	for reverse_index in range(leaked.size() - 1, -1, -1):
+		var index: int = leaked[reverse_index]
+		var type: StringName = enemies[index]["type"]
+		integrity -= int(GameData.enemy_definitions()[type]["leak"])
+		effects.append({"type": "burst", "position": _cell_center(GameData.CORE_CELL), "ttl": 0.5, "color": Color("ff397c")})
+		enemies.remove_at(index)
+		integrity_changed.emit(maxi(0, integrity))
+		sfx_requested.emit(95.0)
+		if integrity <= 0:
+			wave_active = false
+			run_failed.emit(current_wave)
+			return
+
+func _advance_enemy(enemy: Dictionary, distance_cells: float) -> void:
+	var path := _path_for_lane(int(enemy["lane"]))
+	var remaining := distance_cells
+	while remaining > 0.0 and int(enemy["segment"]) < path.size() - 1:
+		var available := 1.0 - float(enemy["segment_t"])
+		if remaining < available:
+			enemy["segment_t"] = float(enemy["segment_t"]) + remaining
+			remaining = 0.0
+		else:
+			remaining -= available
+			enemy["segment"] = int(enemy["segment"]) + 1
+			enemy["segment_t"] = 0.0
+
+func _enemy_position(enemy: Dictionary) -> Vector2:
+	var path := _path_for_lane(int(enemy["lane"]))
+	var segment := mini(int(enemy["segment"]), path.size() - 1)
+	if segment >= path.size() - 1:
+		return _cell_center(path[-1])
+	return _cell_center(path[segment]).lerp(_cell_center(path[segment + 1]), float(enemy["segment_t"]))
+
+func _emit_core_pulses() -> void:
+	for child_id in graph.outgoing_for_pulse(0):
+		_spawn_pulse(0, child_id)
+
+func _spawn_pulse(from_id: int, to_id: int) -> void:
+	if not graph.nodes.has(from_id) or not graph.nodes.has(to_id):
+		return
+	if _is_link_disabled(from_id, to_id):
+		return
+	pulses.append({
+		"id": next_pulse_id, "from": from_id, "to": to_id,
+		"progress": 0.0, "hit": {}, "resonated": {}
+	})
+	next_pulse_id += 1
+
+func _update_pulses(delta: float) -> void:
+	var arrived: Array[int] = []
+	var pulse_speed := 5.0 * float(graph.modifiers["pulse_speed_mult"])
+	for index in range(pulses.size()):
+		var pulse: Dictionary = pulses[index]
+		if _is_link_disabled(int(pulse["from"]), int(pulse["to"])):
+			arrived.append(index)
+			continue
+		var start := _node_position(int(pulse["from"]))
+		var finish := _node_position(int(pulse["to"]))
+		var distance_cells := start.distance_to(finish) / CELL_SIZE
+		pulse["progress"] = float(pulse["progress"]) + delta * pulse_speed / maxf(0.1, distance_cells)
+		_apply_link_effects(pulse, start, finish)
+		pulses[index] = pulse
+		if float(pulse["progress"]) >= 1.0:
+			arrived.append(index)
+	for reverse_index in range(arrived.size() - 1, -1, -1):
+		var index: int = arrived[reverse_index]
+		if index >= pulses.size():
+			continue
+		var pulse: Dictionary = pulses[index]
+		if float(pulse["progress"]) >= 1.0:
+			_on_pulse_arrived(int(pulse["to"]))
+		pulses.remove_at(index)
+	if bool(graph.modifiers["cross_synapse"]):
+		_apply_cross_synapses()
+
+func _apply_link_effects(pulse: Dictionary, start: Vector2, finish: Vector2) -> void:
+	var progress := clampf(float(pulse["progress"]), 0.0, 1.0)
+	var point := start.lerp(finish, progress)
+	var width := CELL_SIZE * LINK_WIDTH * float(graph.modifiers["link_width_mult"])
+	var node_type: StringName = graph.nodes[int(pulse["to"])]["type"]
+	if node_type == &"relay":
+		return
+	var hit: Dictionary = pulse["hit"]
+	for index in range(enemies.size() - 1, -1, -1):
+		var enemy: Dictionary = enemies[index]
+		var enemy_id: int = enemy["id"]
+		if hit.has(enemy_id) or Vector2(enemy["position"]).distance_to(point) > width:
+			continue
+		hit[enemy_id] = true
+		match node_type:
+			&"arc":
+				_damage_enemy(index, 12.0, true)
+			&"cryo":
+				enemy["slow_until"] = world_time + 1.5 + float(graph.modifiers["cryo_trail_bonus"])
+				enemy["slow_factor"] = 0.58
+				enemies[index] = enemy
+				_damage_enemy(index, 2.0, true)
+			&"lance":
+				enemy["marked_until"] = world_time + 2.0
+				enemies[index] = enemy
+				_damage_enemy(index, 4.0, true)
+		effects.append({"type": "spark", "position": enemy["position"], "ttl": 0.22, "color": GameData.tower_definitions()[node_type]["color"]})
+	pulse["hit"] = hit
+
+func _on_pulse_arrived(node_id: int) -> void:
+	if not graph.nodes.has(node_id):
+		return
+	var type: StringName = graph.nodes[node_id]["type"]
+	match type:
+		&"arc": _fire_arc(node_id)
+		&"cryo": _fire_cryo(node_id)
+		&"lance": _fire_lance(node_id)
+	for child_id in graph.outgoing_for_pulse(node_id):
+		_spawn_pulse(node_id, child_id)
+
+func _fire_arc(node_id: int) -> void:
+	var targets := _targets_in_range(_node_position(node_id), 2.5 + float(graph.modifiers["tower_range_bonus"]), 3)
+	var target_ids: Array[int] = []
+	for index in targets:
+		target_ids.append(int(enemies[index]["id"]))
+	for enemy_id in target_ids:
+		var index := _enemy_index_by_id(enemy_id)
+		if index < 0: continue
+		var target_position: Vector2 = enemies[index]["position"]
+		_damage_enemy(index, 9.0, false)
+		effects.append({"type": "line", "from": _node_position(node_id), "to": target_position, "ttl": 0.18, "color": Color("33c8ff")})
+	if not targets.is_empty(): sfx_requested.emit(680.0)
+
+func _fire_cryo(node_id: int) -> void:
+	var targets := _targets_in_range(_node_position(node_id), 2.6 + float(graph.modifiers["tower_range_bonus"]), 1)
+	if targets.is_empty():
+		return
+	var index: int = targets[0]
+	var enemy: Dictionary = enemies[index]
+	enemy["root_until"] = world_time + 0.45
+	enemy["slow_until"] = world_time + 1.5
+	enemy["slow_factor"] = 0.58
+	enemies[index] = enemy
+	_damage_enemy(index, 6.0, false)
+	effects.append({"type": "burst", "position": enemy["position"], "ttl": 0.35, "color": Color("9c82ff")})
+	sfx_requested.emit(420.0)
+
+func _fire_lance(node_id: int) -> void:
+	var node: Dictionary = graph.nodes[node_id]
+	var parent_position := _node_position(int(node["parent"]))
+	var node_position := _node_position(node_id)
+	var direction := (node_position - parent_position).normalized()
+	var beam_range := 6.0 + float(graph.modifiers["lance_range_bonus"])
+	_fire_lance_segment(node_position, node_position + direction * beam_range * CELL_SIZE)
+	if bool(graph.modifiers["bidirectional_lance"]):
+		_fire_lance_segment(node_position, node_position - direction * beam_range * CELL_SIZE)
+	sfx_requested.emit(880.0)
+
+func _fire_lance_segment(start: Vector2, finish: Vector2) -> void:
+	for index in range(enemies.size() - 1, -1, -1):
+		if _distance_to_segment(enemies[index]["position"], start, finish) <= CELL_SIZE * 0.28:
+			var amount := 24.0
+			if world_time < float(enemies[index]["marked_until"]): amount *= 1.5
+			_damage_enemy(index, amount, false)
+	effects.append({"type": "line", "from": start, "to": finish, "ttl": 0.24, "color": Color("ff5ba7")})
+
+func _targets_in_range(origin: Vector2, radius_cells: float, limit: int) -> Array[int]:
+	var candidates: Array[int] = []
+	for index in range(enemies.size()):
+		if origin.distance_to(enemies[index]["position"]) <= radius_cells * CELL_SIZE:
+			candidates.append(index)
+	candidates.sort_custom(func(a: int, b: int) -> bool:
+		return _enemy_progress(enemies[a]) > _enemy_progress(enemies[b])
+	)
+	if candidates.size() > limit:
+		candidates.resize(limit)
+	return candidates
+
+func _damage_enemy(index: int, raw_amount: float, from_link: bool) -> void:
+	if index < 0 or index >= enemies.size():
+		return
+	var enemy: Dictionary = enemies[index]
+	var amount := raw_amount
+	if enemy["type"] == &"husk" and not from_link:
+		amount *= 0.55
+	if enemy["type"] == &"phase" and from_link:
+		amount *= 0.5
+	enemy["hp"] = float(enemy["hp"]) - amount
+	if float(enemy["hp"]) <= 0.0:
+		var definition: Dictionary = GameData.enemy_definitions()[enemy["type"]]
+		charge += int(definition["reward"])
+		charge_changed.emit(charge)
+		effects.append({"type": "burst", "position": enemy["position"], "ttl": 0.4, "color": definition["color"]})
+		enemies.remove_at(index)
+		sfx_requested.emit(300.0)
+	else:
+		enemies[index] = enemy
+
+func _try_disable_link(enemy: Dictionary) -> void:
+	if world_time < float(enemy["disable_cooldown"]):
+		return
+	for child_id in graph.nodes:
+		if child_id == 0: continue
+		var parent_id: int = graph.nodes[child_id]["parent"]
+		var start := _node_position(parent_id)
+		var finish := _node_position(child_id)
+		if _distance_to_segment(enemy["position"], start, finish) <= CELL_SIZE * 0.25:
+			var duration := 4.0 if enemy["type"] == &"severer" else 2.5
+			disabled_links[_edge_key(parent_id, child_id)] = world_time + duration
+			enemy["disable_cooldown"] = world_time + (3.5 if enemy["type"] == &"severer" else 999.0)
+			effects.append({"type": "burst", "position": enemy["position"], "ttl": 0.45, "color": Color("68ff9b")})
+			message_requested.emit("LINK SEVERED")
+			sfx_requested.emit(115.0)
+			return
+
+func _apply_cross_synapses() -> void:
+	for a in range(pulses.size()):
+		for b in range(a + 1, pulses.size()):
+			var pa := _pulse_position(pulses[a])
+			var pb := _pulse_position(pulses[b])
+			if pa.distance_to(pb) > CELL_SIZE * 0.34:
+				continue
+			var pair_key := "%d:%d" % [mini(int(pulses[a]["id"]), int(pulses[b]["id"])), maxi(int(pulses[a]["id"]), int(pulses[b]["id"]))]
+			if resonance_hits.has(pair_key): continue
+			resonance_hits[pair_key] = true
+			var center := (pa + pb) * 0.5
+			for index in range(enemies.size() - 1, -1, -1):
+				if Vector2(enemies[index]["position"]).distance_to(center) <= CELL_SIZE:
+					_damage_enemy(index, 18.0, true)
+			effects.append({"type": "burst", "position": center, "ttl": 0.4, "color": Color("fff27a")})
+
+func _pulse_position(pulse: Dictionary) -> Vector2:
+	return _node_position(int(pulse["from"])).lerp(_node_position(int(pulse["to"])), clampf(float(pulse["progress"]), 0.0, 1.0))
+
+func _check_wave_complete(delta: float) -> void:
+	if spawn_index < spawn_entries.size() or not enemies.is_empty():
+		_finish_delay = -1.0
+		return
+	if _finish_delay < 0.0:
+		_finish_delay = 0.7
+	_finish_delay -= delta
+	if _finish_delay <= 0.0:
+		wave_active = false
+		pulses.clear()
+		charge += 35 + current_wave * 5
+		charge_changed.emit(charge)
+		wave_finished.emit()
+		sfx_requested.emit(560.0)
+
+func _update_effects(delta: float) -> void:
+	for index in range(effects.size() - 1, -1, -1):
+		effects[index]["ttl"] = float(effects[index]["ttl"]) - delta
+		if float(effects[index]["ttl"]) <= 0.0:
+			effects.remove_at(index)
+
+func _prune_disabled_links() -> void:
+	for key in disabled_links.keys():
+		if float(disabled_links[key]) <= world_time:
+			disabled_links.erase(key)
+
+func _is_link_disabled(from_id: int, to_id: int) -> bool:
+	return float(disabled_links.get(_edge_key(from_id, to_id), 0.0)) > world_time
+
+func _edge_key(from_id: int, to_id: int) -> String:
+	return "%d>%d" % [from_id, to_id]
+
+func _gui_input(event: InputEvent) -> void:
+	var point := Vector2(-1, -1)
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		point = event.position
+	elif event is InputEventScreenTouch and event.pressed:
+		point = event.position
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+		clear_tool()
+		accept_event()
+		return
+	if point.x < 0.0:
+		return
+	var cell := Vector2i(floori(point.x / CELL_SIZE), floori(point.y / CELL_SIZE))
+	if not _cell_in_board(cell):
+		return
+	_handle_cell_tap(cell)
+	accept_event()
+
+func _handle_cell_tap(cell: Vector2i) -> void:
+	var existing := graph.node_at(cell)
+	if rewire_mode:
+		if existing >= 0 and graph.reparent(selected_node_id, existing):
+			rewire_mode = false
+			message_requested.emit("Branch rerouted")
+			sfx_requested.emit(360.0)
+		else:
+			message_requested.emit("Invalid parent: check reach, ports, and cycles")
+		queue_redraw()
+		return
+	if not selected_tower.is_empty():
+		if not build_allowed:
+			message_requested.emit("Construction is locked during this wave")
+			return
+		if existing >= 0:
+			selected_node_id = existing
+			node_selected.emit(existing)
+			return
+		if not _is_buildable(cell):
+			message_requested.emit("That tissue cannot host a node")
+			return
+		var definitions := GameData.tower_definitions()
+		var cost: int = definitions[selected_tower]["cost"]
+		if charge < cost:
+			message_requested.emit("Insufficient charge")
+			return
+		var parents := _filtered_parents(cell, selected_tower)
+		if parents.is_empty():
+			message_requested.emit("No powered parent in range")
+			return
+		if preview_cell != cell:
+			preview_cell = cell
+			preview_parents = parents
+			preview_parent_index = 0
+			message_requested.emit("Tap again to grow %s • %d charge" % [definitions[selected_tower]["name"], cost])
+			queue_redraw()
+			return
+		var parent_id := preview_parents[preview_parent_index]
+		var new_id := graph.place_node(selected_tower, cell, parent_id)
+		if new_id >= 0:
+			charge -= cost
+			charge_changed.emit(charge)
+			selected_node_id = new_id
+			node_selected.emit(new_id)
+			preview_cell = Vector2i(-1, -1)
+			preview_parents.clear()
+			sfx_requested.emit(460.0)
+		queue_redraw()
+		return
+	if existing >= 0:
+		selected_node_id = existing
+		node_selected.emit(existing)
+		queue_redraw()
+
+func _filtered_parents(cell: Vector2i, tower_type: StringName) -> Array[int]:
+	var result: Array[int] = []
+	for parent_id in graph.valid_parent_ids(cell, tower_type):
+		if bool(graph.modifiers["phase_axon"]) or not _link_hits_blocker(graph.nodes[parent_id]["cell"], cell):
+			result.append(parent_id)
+	return result
+
+func _link_hits_blocker(from_cell: Vector2i, to_cell: Vector2i) -> bool:
+	var start := Vector2(from_cell) + Vector2(0.5, 0.5)
+	var finish := Vector2(to_cell) + Vector2(0.5, 0.5)
+	for cell in blocked_cells:
+		if cell == from_cell or cell == to_cell: continue
+		if _distance_to_segment(Vector2(cell) + Vector2(0.5, 0.5), start, finish) < 0.44:
+			return true
+	return false
+
+func _is_buildable(cell: Vector2i) -> bool:
+	return _cell_in_board(cell) and cell not in top_path and cell not in bottom_path and cell not in blocked_cells
+
+func _cell_in_board(cell: Vector2i) -> bool:
+	return cell.x >= 0 and cell.y >= 0 and cell.x < GameData.BOARD_COLUMNS and cell.y < GameData.BOARD_ROWS
+
+func _path_for_lane(lane: int) -> Array[Vector2i]:
+	return top_path if lane == 0 else bottom_path
+
+func _node_position(node_id: int) -> Vector2:
+	return _cell_center(graph.nodes[node_id]["cell"])
+
+func _cell_center(cell: Vector2i) -> Vector2:
+	return (Vector2(cell) + Vector2(0.5, 0.5)) * CELL_SIZE
+
+func _enemy_progress(enemy: Dictionary) -> float:
+	return float(enemy["segment"]) + float(enemy["segment_t"])
+
+func _enemy_index_by_id(enemy_id: int) -> int:
+	for index in range(enemies.size()):
+		if int(enemies[index]["id"]) == enemy_id:
+			return index
+	return -1
+
+func _node_name(node_id: int) -> String:
+	if node_id == 0: return "CORE"
+	return str(GameData.tower_definitions()[graph.nodes[node_id]["type"]]["name"])
+
+func _distance_to_segment(point: Vector2, start: Vector2, finish: Vector2) -> float:
+	var line := finish - start
+	var length_squared := line.length_squared()
+	if length_squared <= 0.0001: return point.distance_to(start)
+	var t := clampf((point - start).dot(line) / length_squared, 0.0, 1.0)
+	return point.distance_to(start + line * t)
+
+func _draw() -> void:
+	_draw_board_surface()
+	_draw_paths()
+	_draw_links()
+	_draw_nodes()
+	_draw_enemies()
+	_draw_pulses()
+	_draw_effects()
+	if combat_paused:
+		draw_rect(Rect2(Vector2.ZERO, size), Color(0.03, 0.08, 0.14, 0.22))
+
+func _draw_board_surface() -> void:
+	draw_rect(Rect2(Vector2.ZERO, size), Color("09162a"), true)
+	for y in range(GameData.BOARD_ROWS):
+		for x in range(GameData.BOARD_COLUMNS):
+			var cell := Vector2i(x, y)
+			var rect := Rect2(Vector2(x, y) * CELL_SIZE + Vector2(2, 2), Vector2(CELL_SIZE - 4, CELL_SIZE - 4))
+			var color := Color(0.06, 0.14, 0.22, 0.5) if (x + y) % 2 == 0 else Color(0.04, 0.11, 0.19, 0.5)
+			if _is_buildable(cell):
+				draw_rect(rect, color, true)
+			else:
+				draw_rect(rect, Color(0.05, 0.08, 0.13, 0.55), true)
+	for cell in blocked_cells:
+		var center := _cell_center(cell)
+		draw_circle(center, 22, Color("251536"))
+		for spoke in range(6):
+			var direction := Vector2.RIGHT.rotated(spoke * TAU / 6.0)
+			draw_line(center + direction * 6, center + direction * 26, Color("8d3c83"), 3)
+
+func _draw_paths() -> void:
+	for path in [top_path, bottom_path]:
+		var points := PackedVector2Array()
+		for cell in path: points.append(_cell_center(cell))
+		draw_polyline(points, Color("142740"), 38.0, true)
+		draw_polyline(points, Color(0.2, 0.62, 0.73, 0.18), 3.0, true)
+	for lane in range(2):
+		var spawn := _cell_center(_path_for_lane(lane)[0])
+		draw_circle(spawn, 18, Color("ff5b74"))
+		draw_circle(spawn, 9, Color("190b21"))
+
+func _draw_links() -> void:
+	for raw_id in graph.nodes:
+		var id: int = raw_id
+		if id == 0: continue
+		var node: Dictionary = graph.nodes[id]
+		var parent_id: int = node["parent"]
+		var color: Color = GameData.tower_definitions()[node["type"]]["color"]
+		var disabled := _is_link_disabled(parent_id, id)
+		if disabled: color = Color("ff4a67")
+		draw_line(_node_position(parent_id), _node_position(id), Color(color, 0.18), 10.0, true)
+		draw_line(_node_position(parent_id), _node_position(id), Color(color, 0.58 if not disabled else 0.32), 2.0, true)
+		if disabled:
+			var middle := _node_position(parent_id).lerp(_node_position(id), 0.5)
+			draw_line(middle - Vector2(8, 8), middle + Vector2(8, 8), color, 3)
+			draw_line(middle + Vector2(8, -8), middle + Vector2(-8, 8), color, 3)
+	if preview_cell.x >= 0 and not preview_parents.is_empty():
+		var parent_id := preview_parents[preview_parent_index]
+		var color: Color = GameData.tower_definitions()[selected_tower]["color"]
+		draw_dashed_line(_node_position(parent_id), _cell_center(preview_cell), Color(color, 0.9), 3.0, 10.0)
+
+func _draw_nodes() -> void:
+	var core := _node_position(0)
+	draw_circle(core, 30, Color(0.12, 0.95, 0.72, 0.14))
+	draw_circle(core, 23, Color("153e4b"))
+	draw_circle(core, 13 + sin(world_time * 3.0) * 2.0, Color("62f4d2"))
+	for raw_id in graph.nodes:
+		var id: int = raw_id
+		if id == 0: continue
+		var node: Dictionary = graph.nodes[id]
+		var pos := _node_position(id)
+		var color: Color = GameData.tower_definitions()[node["type"]]["color"]
+		if id == selected_node_id:
+			draw_circle(pos, 29, Color(1, 1, 1, 0.22))
+		draw_circle(pos, 22, Color(color, 0.2))
+		draw_circle(pos, 16, Color("0b1829"))
+		match node["type"]:
+			&"relay":
+				for spoke in range(3):
+					var d := Vector2.UP.rotated(spoke * TAU / 3.0)
+					draw_circle(pos + d * 10, 4, color)
+			&"arc":
+				draw_polyline(PackedVector2Array([pos + Vector2(-9, 7), pos + Vector2(-2, -8), pos + Vector2(3, 2), pos + Vector2(9, -7)]), color, 3.0)
+			&"cryo":
+				for spoke in range(6): draw_line(pos, pos + Vector2.UP.rotated(spoke * TAU / 6.0) * 11, color, 2)
+			&"lance":
+				var parent := _node_position(int(node["parent"]))
+				var direction := (pos - parent).normalized()
+				draw_line(pos - direction * 10, pos + direction * 12, color, 5)
+
+func _draw_enemies() -> void:
+	var font := ThemeDB.fallback_font
+	for enemy in enemies:
+		var pos: Vector2 = enemy["position"]
+		var definition: Dictionary = GameData.enemy_definitions()[enemy["type"]]
+		var radius := 22.0 if enemy["type"] == &"severer" else (14.0 if enemy["type"] == &"husk" else 10.0)
+		draw_circle(pos, radius + 4, Color(0, 0, 0, 0.45))
+		draw_circle(pos, radius, definition["color"])
+		if enemy["type"] == &"phase": draw_arc(pos, radius + 5, 0, TAU, 18, Color("6fdcff"), 2)
+		if enemy["type"] == &"leech" or enemy["type"] == &"severer":
+			draw_line(pos - Vector2(radius * 0.6, 0), pos + Vector2(radius * 0.6, 0), Color("071022"), 3)
+		var ratio := clampf(float(enemy["hp"]) / float(enemy["max_hp"]), 0.0, 1.0)
+		draw_rect(Rect2(pos + Vector2(-radius, -radius - 9), Vector2(radius * 2, 4)), Color("351729"))
+		draw_rect(Rect2(pos + Vector2(-radius, -radius - 9), Vector2(radius * 2 * ratio, 4)), Color("62f4d2"))
+		if enemy["type"] == &"severer":
+			draw_string(font, pos + Vector2(-24, 38), "BOSS", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("ffb4d2"))
+
+func _draw_pulses() -> void:
+	for pulse in pulses:
+		var start := _node_position(int(pulse["from"]))
+		var finish := _node_position(int(pulse["to"]))
+		var p := clampf(float(pulse["progress"]), 0.0, 1.0)
+		var position := start.lerp(finish, p)
+		var type: StringName = graph.nodes[int(pulse["to"])]["type"]
+		var color: Color = Color("62f4d2") if type == &"relay" else GameData.tower_definitions()[type]["color"]
+		draw_circle(position, 11, Color(color, 0.16))
+		draw_circle(position, 5, color)
+
+func _draw_effects() -> void:
+	for effect in effects:
+		var alpha := clampf(float(effect["ttl"]) * 2.5, 0.0, 1.0)
+		var color := Color(effect["color"], alpha)
+		match effect["type"]:
+			"line": draw_line(effect["from"], effect["to"], color, 4.0, true)
+			"burst": draw_arc(effect["position"], 12.0 + (1.0 - alpha) * 28.0, 0, TAU, 24, color, 4.0)
+			"spark": draw_circle(effect["position"], 5.0 + (1.0 - alpha) * 5.0, color)
