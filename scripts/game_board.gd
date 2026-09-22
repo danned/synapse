@@ -41,6 +41,7 @@ var coverage_enabled := true
 var rewire_mode := false
 var build_allowed := true
 var combat_paused := false
+var simulation_speed := 1
 var wave_active := false
 var objective: Dictionary = {}
 var objective_status: StringName = &""
@@ -310,6 +311,17 @@ func _process(delta: float) -> void:
 	if combat_paused:
 		queue_redraw()
 		return
+	if wave_active and simulation_speed > 1:
+		var remaining := delta * simulation_speed
+		while remaining > 0.0 and wave_active and not combat_paused and is_processing():
+			var step := minf(remaining, 1.0 / 30.0)
+			_advance_simulation(step)
+			remaining -= step
+	else:
+		_advance_simulation(delta)
+	queue_redraw()
+
+func _advance_simulation(delta: float) -> void:
 	world_time += delta
 	_update_effects(delta)
 	if wave_active:
@@ -325,7 +337,6 @@ func _process(delta: float) -> void:
 		_update_pulses(delta)
 		_prune_disabled_links()
 		_check_wave_complete(delta)
-	queue_redraw()
 
 func _spawn_ready_enemies() -> void:
 	while spawn_index < spawn_entries.size() and float(spawn_entries[spawn_index]["time"]) <= wave_time:

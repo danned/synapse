@@ -34,6 +34,7 @@ func _run_tests() -> void:
 	_test_specialization_ui()
 	_test_controller_setup()
 	_test_build_policy()
+	_test_fast_forward()
 	_test_menu_exit_confirmation()
 	_test_progression_defaults()
 	if failures.is_empty():
@@ -435,6 +436,40 @@ func _test_build_policy() -> void:
 	_expect(GameController.is_build_allowed("hardcore", true), "Hardcore mode must allow building during combat")
 	_expect(GameController.is_build_allowed("normal", false), "Every mode must allow building between waves")
 	_expect(not GameController.is_build_allowed("endless", true), "Endless must use Normal build timing")
+
+func _test_fast_forward() -> void:
+	for difficulty_id in ["easy", "normal", "hardcore", "endless"]:
+		var game := GameController.new()
+		root.add_child(game)
+		game.setup(difficulty_id, 424242, GameData.BASE_CARD_IDS, false)
+		_expect(game.simulation_speed == 1 and game.board.simulation_speed == 1, "%s run starts at 1×" % difficulty_id)
+		game.board.wave_active = true
+		game.board.spawn_entries = [{"time": 1000.0}]
+		for speed in [2, 4, 8, 1]:
+			game.speed_button.emit_signal("pressed")
+			_expect(game.simulation_speed == speed and game.board.simulation_speed == speed, "%s cycles to %d×" % [difficulty_id, speed])
+			_expect(game.speed_button.text == "SPEED %d×" % speed, "%s displays %d×" % [difficulty_id, speed])
+			var before := game.board.wave_time
+			game.board._process(0.25)
+			_expect(is_equal_approx(game.board.wave_time - before, 0.25 * speed), "%s wave advances at %d×" % [difficulty_id, speed])
+		if difficulty_id == "easy":
+			for unused in range(3):
+				game.speed_button.emit_signal("pressed")
+			game.board.set_combat_paused(true)
+			var paused_time := game.board.wave_time
+			game.board._process(0.25)
+			_expect(is_equal_approx(game.board.wave_time, paused_time), "Easy tactical pause freezes accelerated combat")
+			game.board.set_combat_paused(false)
+		if difficulty_id == "hardcore":
+			for unused in range(3):
+				game.speed_button.emit_signal("pressed")
+			game.countdown = 5.0
+			game._process(1.0)
+			_expect(is_equal_approx(game.countdown, 4.0), "Hardcore countdown stays at normal speed")
+			game.board.wave_active = false
+			game.board.start_wave(game.manifests[0])
+			_expect(game.simulation_speed == 8 and game.board.simulation_speed == 8, "Selected speed persists into the next wave")
+		game.queue_free()
 
 func _test_menu_exit_confirmation() -> void:
 	for difficulty_id in ["easy", "normal", "hardcore"]:

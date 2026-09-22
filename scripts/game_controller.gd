@@ -1,6 +1,8 @@
 class_name GameController
 extends Control
 
+const SPEEDS := [1, 2, 4, 8]
+
 signal exit_requested
 signal run_ended(wave_reached: int, victory: bool, difficulty: String, seed_value: int, mutators: Array[String])
 signal tutorial_completed
@@ -27,6 +29,7 @@ var objective_label: Label
 var status_label: Label
 var start_button: Button
 var pause_button: Button
+var speed_button: Button
 var menu_button: Button
 var cycle_button: Button
 var rewire_button: Button
@@ -40,6 +43,7 @@ var countdown := -1.0
 var _last_countdown_second := -1
 var _run_over := false
 var _last_objective_result := ""
+var simulation_speed := 1
 var _exit_confirmation: Control
 var _specialization_overlay: Control
 var sound_manager: SoundManager
@@ -59,6 +63,7 @@ func setup(p_difficulty: String, p_seed: int, p_deck: Array, show_tutorial: bool
 	manifests = RunGenerator.generate_run(seed_value, level, run_mutators)
 	_build_ui()
 	board.configure(seed_value, difficulty, level, perks, run_mutators)
+	board.simulation_speed = simulation_speed
 	_update_coverage_readout()
 	_update_wave_preview()
 	_update_build_policy()
@@ -106,6 +111,13 @@ func _build_ui() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top_row.add_child(spacer)
+	speed_button = Button.new()
+	speed_button.text = "SPEED 1×"
+	speed_button.custom_minimum_size = Vector2(82, 44)
+	speed_button.add_theme_font_size_override("font_size", 12)
+	speed_button.tooltip_text = "Cycle wave speed: 1×, 2×, 4×, 8×"
+	speed_button.pressed.connect(_cycle_speed)
+	top_row.add_child(speed_button)
 	coverage_button = Button.new()
 	coverage_button.text = "COVERAGE ON"
 	coverage_button.toggle_mode = true
@@ -115,7 +127,7 @@ func _build_ui() -> void:
 	coverage_button.tooltip_text = "Show link coverage and pulse cadence"
 	coverage_button.toggled.connect(_toggle_coverage)
 	top_row.add_child(coverage_button)
-	var seed_label := _hud_label("SEED %d" % seed_value, Color("7b9bb6"), 170)
+	var seed_label := _hud_label("SEED %d" % seed_value, Color("7b9bb6"), 150)
 	seed_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	top_row.add_child(seed_label)
 	menu_button = Button.new()
@@ -265,6 +277,12 @@ func _build_ui() -> void:
 func _toggle_coverage(enabled: bool) -> void:
 	board.set_coverage_enabled(enabled)
 	coverage_button.text = "COVERAGE ON" if enabled else "COVERAGE OFF"
+
+func _cycle_speed() -> void:
+	var index := SPEEDS.find(simulation_speed)
+	simulation_speed = SPEEDS[(index + 1) % SPEEDS.size()]
+	board.simulation_speed = simulation_speed
+	speed_button.text = "SPEED %d×" % simulation_speed
 
 func _update_coverage_readout() -> void:
 	if not board.coverage_enabled:
