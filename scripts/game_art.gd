@@ -18,7 +18,8 @@ const ENEMY_ICONS := {
 	&"leech": preload("res://assets/icons/leech.svg"),
 	&"severer": preload("res://assets/icons/severer.svg"),
 	&"splitter": preload("res://assets/icons/splitter.svg"),
-	&"conductor": preload("res://assets/icons/conductor.svg")
+	&"conductor": preload("res://assets/icons/conductor.svg"),
+	&"shielder": preload("res://assets/icons/shielder.svg")
 }
 
 static func tower_icon(type: StringName) -> Texture2D:

@@ -466,7 +466,8 @@ func _update_wave_preview() -> void:
 			intel_meta_label.text = "▲ %s\n▼ %s" % [top_word, bottom_word]
 		_:
 			var boss_warning := "\n\nBOSS SIGNAL" if next_wave_index == 9 else ""
-			intel_meta_label.text = "THREAT\n%s%s" % [_threat_word(int(summary["total"])), boss_warning]
+			var support_warning := "\n\nSUPPORT SIGNAL" if summary["counts"].has(&"shielder") else ""
+			intel_meta_label.text = "THREAT\n%s%s%s" % [_threat_word(int(summary["total"])), support_warning, boss_warning]
 
 func _add_intel_type_row(type: StringName, row_text: String) -> void:
 	var row := HBoxContainer.new()

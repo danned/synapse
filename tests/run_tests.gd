@@ -24,6 +24,8 @@ func _run_tests() -> void:
 	_test_campaign_waves()
 	_test_endless_scaling()
 	_test_new_enemy_behaviors()
+	_test_shielder_behavior()
+	_test_shielder_intel()
 	_test_controller_setup()
 	_test_build_policy()
 	_test_menu_exit_confirmation()
@@ -44,7 +46,7 @@ func _expect(condition: bool, message: String) -> void:
 
 func _test_content_catalog() -> void:
 	_expect(GameData.tower_definitions().size() == 6, "Tower catalog must contain six nodes")
-	_expect(GameData.enemy_definitions().size() == 8, "Enemy catalog must contain seven units and the boss")
+	_expect(GameData.enemy_definitions().size() == 9, "Enemy catalog must contain eight units and the boss")
 	_expect(GameData.card_definitions().size() == 20, "Card catalog must contain eight base, four advanced and eight gene cards")
 	_expect(GameData.BASE_CARD_IDS.size() == 8, "Starting deck must contain eight cards")
 	for id in GameData.GENE_CARD_IDS:
@@ -345,6 +347,11 @@ func _test_campaign_waves() -> void:
 			_expect(entry["type"] != &"severer" or level == 5, "Boss must appear only in final campaign level")
 	_expect(&"splitter" in RunGenerator.available_types(3, 3), "Splitter must arrive in level three")
 	_expect(&"conductor" in RunGenerator.available_types(5, 3), "Conductor must arrive in level five")
+	_expect(&"shielder" not in RunGenerator.available_types(3, 10), "Shielder must not appear before level four")
+	_expect(&"shielder" in RunGenerator.available_types(4, 4), "Shielder must become available in level four wave four")
+	for level in [4, 5]:
+		var introduction := RunGenerator.generate_wave(2026, 4, level)
+		_expect(int(RunGenerator.summarize(introduction)["counts"].get(&"shielder", 0)) >= 1, "Level %d wave four must introduce a Shielder" % level)
 	_expect(&"husk" not in RunGenerator.available_types(1, 10), "Early level must not include later enemy types")
 
 func _test_endless_scaling() -> void:
@@ -392,6 +399,61 @@ func _test_new_enemy_behaviors() -> void:
 	towers._fire_rift(rift)
 	_expect(not towers.rift_zones.is_empty(), "Rift must create a persistent field")
 	towers.free()
+
+func _test_shielder_behavior() -> void:
+	var board := GameBoard.new()
+	board.configure(42, "normal", 4)
+	board._spawn_enemy(&"shielder", 0)
+	board._spawn_enemy(&"crawler", 0)
+	board._spawn_enemy(&"crawler", 1)
+	board._spawn_enemy(&"crawler", 0)
+	board._spawn_enemy(&"shielder", 0)
+	var center: Vector2 = board.enemies[0]["position"]
+	board.enemies[1]["position"] = center + Vector2(GameBoard.CELL_SIZE, 0)
+	board.enemies[2]["position"] = center + Vector2(0, GameBoard.SHIELD_RADIUS)
+	board.enemies[3]["position"] = center + Vector2(GameBoard.SHIELD_RADIUS + 1, 0)
+	board.enemies[4]["position"] = center
+	board.world_time = 0.74
+	board._update_shielders()
+	_expect(float(board.enemies[1]["shield_until"]) == 0.0, "Shielder must wait before its first pulse")
+	board.world_time = 0.75
+	board._update_shielders()
+	_expect(is_equal_approx(float(board.enemies[1]["shield_until"]), 2.25), "Nearby ally must receive a timed shield")
+	_expect(is_equal_approx(float(board.enemies[2]["shield_until"]), 2.25), "Shield radius must include its boundary across lanes")
+	_expect(float(board.enemies[3]["shield_until"]) == 0.0, "Shield must not reach beyond two cells")
+	_expect(float(board.enemies[4]["shield_until"]) == 0.0, "Shielders must not shield each other")
+	board._damage_enemy(1, 10.0, false)
+	board._damage_enemy(1, 10.0, true)
+	_expect(is_equal_approx(float(board.enemies[1]["hp"]), 21.0), "Shield must reduce both tower and link damage")
+	board._damage_enemy(0, 100.0, false)
+	board.world_time = 1.0
+	board._damage_enemy(0, 10.0, false)
+	_expect(is_equal_approx(float(board.enemies[0]["hp"]), 14.5), "Shield must persist briefly after its source dies")
+	board.world_time = 2.25
+	board._damage_enemy(0, 10.0, false)
+	_expect(is_equal_approx(float(board.enemies[0]["hp"]), 4.5), "Expired shield must stop reducing damage")
+	board.world_time = 4.74
+	board._update_shielders()
+	_expect(is_equal_approx(float(board.enemies[0]["shield_until"]), 2.25), "Shield pulse must wait for its four-second interval")
+	board.world_time = 4.75
+	board._update_shielders()
+	_expect(is_equal_approx(float(board.enemies[0]["shield_until"]), 6.25), "Living Shielder must pulse again after four seconds")
+	board.free()
+
+func _test_shielder_intel() -> void:
+	for difficulty_id in ["easy", "normal", "endless", "hardcore"]:
+		var controller := GameController.new()
+		controller.setup(difficulty_id, 42, GameData.BASE_CARD_IDS, false, 4)
+		controller.next_wave_index = 3
+		controller._update_wave_preview()
+		var rows := ""
+		for row in controller.intel_types.get_children():
+			rows += (row.get_child(1) as Label).text
+		if difficulty_id == "hardcore":
+			_expect(rows.is_empty() and "SUPPORT SIGNAL" in controller.intel_meta_label.text, "Hardcore intel must warn of support without naming it")
+		else:
+			_expect("Shielder" in rows, "%s intel must name the Shielder" % difficulty_id)
+		controller.free()
 
 func _test_controller_setup() -> void:
 	var controller := GameController.new()

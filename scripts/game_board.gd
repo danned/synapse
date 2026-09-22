@@ -13,6 +13,10 @@ signal coverage_changed
 const CELL_SIZE := 64.0
 const LINK_WIDTH := 0.42
 const LANCE_ICON_FORWARD := Vector2(-1.0, -1.0)
+const SHIELD_RADIUS := CELL_SIZE * 2.0
+const SHIELD_INTERVAL := 4.0
+const SHIELD_DURATION := 1.5
+const SHIELD_DAMAGE_MULT := 0.65
 
 var graph := NetworkGraph.new()
 var charge := GameData.STARTING_CHARGE
@@ -278,6 +282,7 @@ func _process(delta: float) -> void:
 			_emit_core_pulses()
 		_spawn_ready_enemies()
 		_update_enemies(delta)
+		_update_shielders()
 		_update_rift_zones(delta)
 		_update_pulses(delta)
 		_prune_disabled_links()
@@ -298,7 +303,8 @@ func _spawn_enemy(type: StringName, lane: int, segment: int = 0, segment_t: floa
 		"segment": segment, "segment_t": segment_t, "position": _cell_center(_path_for_lane(lane)[0]),
 		"hp": health, "max_hp": health, "reward_override": reward_override,
 		"slow_until": 0.0, "slow_factor": 1.0, "root_until": 0.0,
-		"marked_until": 0.0, "disable_cooldown": 0.0
+		"marked_until": 0.0, "disable_cooldown": 0.0,
+		"shield_until": 0.0, "next_shield_pulse": world_time + 0.75
 	}
 	enemy["position"] = _enemy_position(enemy)
 	next_enemy_id += 1
@@ -340,6 +346,22 @@ func _update_enemies(delta: float) -> void:
 			wave_active = false
 			run_failed.emit(current_wave)
 			return
+
+func _update_shielders() -> void:
+	for source_index in range(enemies.size()):
+		var source: Dictionary = enemies[source_index]
+		if source["type"] != &"shielder" or world_time < float(source["next_shield_pulse"]):
+			continue
+		source["next_shield_pulse"] = world_time + SHIELD_INTERVAL
+		enemies[source_index] = source
+		var center: Vector2 = source["position"]
+		effects.append({"type": "shield_pulse", "position": center, "ttl": 0.4, "color": GameData.enemy_definitions()[&"shielder"]["color"]})
+		for ally_index in range(enemies.size()):
+			var ally: Dictionary = enemies[ally_index]
+			if ally["type"] == &"shielder" or Vector2(ally["position"]).distance_to(center) > SHIELD_RADIUS:
+				continue
+			ally["shield_until"] = maxf(float(ally["shield_until"]), world_time + SHIELD_DURATION)
+			enemies[ally_index] = ally
 
 func _advance_enemy(enemy: Dictionary, distance_cells: float) -> void:
 	var path := _path_for_lane(int(enemy["lane"]))
@@ -551,6 +573,8 @@ func _damage_enemy(index: int, raw_amount: float, from_link: bool) -> void:
 		amount *= 0.5
 	if from_link and bool(graph.modifiers["conductive_mark"]) and world_time < float(enemy["marked_until"]):
 		amount *= 1.25
+	if world_time < float(enemy["shield_until"]):
+		amount *= SHIELD_DAMAGE_MULT
 	enemy["hp"] = float(enemy["hp"]) - amount
 	if float(enemy["hp"]) <= 0.0:
 		var definition: Dictionary = GameData.enemy_definitions()[enemy["type"]]
@@ -916,6 +940,11 @@ func _draw_nodes() -> void:
 func _draw_enemies() -> void:
 	var font := ThemeDB.fallback_font
 	for enemy in enemies:
+		if enemy["type"] == &"shielder":
+			var center: Vector2 = enemy["position"]
+			draw_circle(center, SHIELD_RADIUS, Color(0.44, 0.75, 1.0, 0.07))
+			draw_arc(center, SHIELD_RADIUS, 0, TAU, 48, Color(0.44, 0.75, 1.0, 0.48), 2.0)
+	for enemy in enemies:
 		var pos: Vector2 = enemy["position"]
 		var definition: Dictionary = GameData.enemy_definitions()[enemy["type"]]
 		var radius := 22.0 if enemy["type"] == &"severer" else (14.0 if enemy["type"] == &"husk" else 10.0)
@@ -927,6 +956,8 @@ func _draw_enemies() -> void:
 			icon_color.a = 0.76
 		draw_texture_rect(icon, Rect2(pos - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false, icon_color)
 		if enemy["type"] == &"phase": draw_arc(pos, radius + 5, 0, TAU, 18, Color("6fdcff"), 2)
+		if world_time < float(enemy["shield_until"]):
+			draw_arc(pos, radius + 6, 0, TAU, 24, Color("70bfff"), 3)
 		var ratio := clampf(float(enemy["hp"]) / float(enemy["max_hp"]), 0.0, 1.0)
 		draw_rect(Rect2(pos + Vector2(-radius, -radius - 9), Vector2(radius * 2, 4)), Color("351729"))
 		draw_rect(Rect2(pos + Vector2(-radius, -radius - 9), Vector2(radius * 2 * ratio, 4)), Color("62f4d2"))
@@ -952,3 +983,4 @@ func _draw_effects() -> void:
 			"line": draw_line(effect["from"], effect["to"], color, 4.0, true)
 			"burst": draw_arc(effect["position"], 12.0 + (1.0 - alpha) * 28.0, 0, TAU, 24, color, 4.0)
 			"spark": draw_circle(effect["position"], 5.0 + (1.0 - alpha) * 5.0, color)
+			"shield_pulse": draw_arc(effect["position"], SHIELD_RADIUS * (1.0 - alpha), 0, TAU, 48, color, 4.0)

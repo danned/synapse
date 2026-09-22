@@ -16,6 +16,7 @@ static func available_types(level: int, wave_number: int) -> Array[StringName]:
 	if level >= 3 and wave_number >= 3: available.append(&"splitter")
 	if level >= 3 and wave_number >= 4: available.append(&"phase")
 	if level >= 4 and wave_number >= 5: available.append(&"leech")
+	if level >= 4 and wave_number >= 4: available.append(&"shielder")
 	if level >= 5 and wave_number >= 3: available.append(&"conductor")
 	return available
 
@@ -37,6 +38,9 @@ static func generate_wave(seed_value: int, wave_number: int, level: int = 1, end
 		var introduction: StringName = &"conductor" if level >= 5 else &"splitter"
 		entries.append({"time": 1.0, "type": introduction, "lane": rng.randi_range(0, 1)})
 		budget -= float(definitions[introduction]["threat"])
+	if wave_number == 4 and level >= 4:
+		entries.append({"time": 1.0, "type": &"shielder", "lane": rng.randi_range(0, 1)})
+		budget -= float(definitions[&"shielder"]["threat"])
 	var safety := 0
 	while budget >= 0.95 and safety < 60:
 		safety += 1

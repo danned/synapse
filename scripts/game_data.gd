@@ -108,6 +108,11 @@ static func enemy_definitions() -> Dictionary:
 			"name": "Conductor", "hp": 88.0, "speed": 0.76, "reward": 12,
 			"leak": 2, "threat": 4.0, "color": Color("e9ff70"),
 			"trait": "Speeds nearby enemies"
+		},
+		&"shielder": {
+			"name": "Shielder", "hp": 24.0, "speed": 0.8, "reward": 8,
+			"leak": 1, "threat": 2.8, "color": Color("70bfff"),
+			"trait": "Briefly shields nearby allies"
 		}
 	}
 
