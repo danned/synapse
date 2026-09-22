@@ -30,6 +30,7 @@ var cycle_button: Button
 var rewire_button: Button
 var sell_button: Button
 var node_label: Label
+var specialization_button: Button
 var coverage_button: Button
 var coverage_label: Label
 var tower_buttons: Dictionary = {}
@@ -37,6 +38,7 @@ var countdown := -1.0
 var _last_countdown_second := -1
 var _run_over := false
 var _exit_confirmation: Control
+var _specialization_overlay: Control
 var sound_manager: SoundManager
 
 func setup(p_difficulty: String, p_seed: int, p_deck: Array, show_tutorial: bool, p_level: int = 1, p_loadout: Array = [], perks: Dictionary = {}) -> void:
@@ -138,6 +140,7 @@ func _build_ui() -> void:
 	board.message_requested.connect(_set_status)
 	board.sfx_requested.connect(_play_sound)
 	board.coverage_changed.connect(_update_coverage_readout)
+	board.specialization_state_changed.connect(_refresh_specialization_ui)
 
 	var bottom := PanelContainer.new()
 	bottom.position = Vector2(8, 604)
@@ -183,6 +186,13 @@ func _build_ui() -> void:
 	sell_button.disabled = true
 	sell_button.pressed.connect(_sell_selected)
 	actions.add_child(sell_button)
+	specialization_button = Button.new()
+	specialization_button.text = "SELECT A NODE"
+	specialization_button.custom_minimum_size = Vector2(150, 22)
+	specialization_button.add_theme_font_size_override("font_size", 11)
+	specialization_button.disabled = true
+	specialization_button.pressed.connect(_show_specializations)
+	selected_column.add_child(specialization_button)
 	var control_column := VBoxContainer.new()
 	control_column.custom_minimum_size = Vector2(175, 72)
 	row.add_child(control_column)
@@ -331,6 +341,7 @@ func _select_tower(type: StringName) -> void:
 		_set_status("Construction is locked right now")
 		return
 	board.set_selected_tower(type)
+	_refresh_specialization_ui()
 	var definition: Dictionary = GameData.tower_definitions()[type]
 	_set_status("%s selected • tap a cell, then confirm" % definition["name"])
 	for tower_type in tower_buttons:
@@ -341,11 +352,92 @@ func _on_node_selected(node_id: int) -> void:
 		node_label.text = "CORE"
 		rewire_button.disabled = true
 		sell_button.disabled = true
+		_refresh_specialization_ui()
 		return
 	var type: StringName = board.graph.nodes[node_id]["type"]
 	node_label.text = "%s  •  NODE %d" % [GameData.tower_definitions()[type]["name"], node_id]
 	rewire_button.disabled = not board.build_allowed
 	sell_button.disabled = not board.build_allowed
+	_refresh_specialization_ui()
+
+func _refresh_specialization_ui() -> void:
+	if not is_instance_valid(specialization_button):
+		return
+	var node_id := board.selected_node_id
+	if node_id <= 0 or not board.graph.nodes.has(node_id):
+		specialization_button.text = "SELECT A NODE"
+		specialization_button.disabled = true
+		return
+	var node: Dictionary = board.graph.nodes[node_id]
+	if node["type"] == &"relay":
+		specialization_button.text = "RELAY · ROUTING"
+		specialization_button.disabled = true
+		return
+	var choice: StringName = node["specialization"]
+	if choice != &"":
+		var definition: Dictionary = GameData.specialization_definitions()[node["type"]][0 if choice == &"a" else 1]
+		specialization_button.text = "%s · %s" % [choice.to_upper(), definition["name"]]
+		specialization_button.tooltip_text = definition["description"]
+		specialization_button.disabled = true
+		return
+	var progress := mini(int(node["participated_waves"]), GameData.SPECIALIZATION_WAVES)
+	if progress < GameData.SPECIALIZATION_WAVES:
+		specialization_button.text = "PULSED WAVES %d / %d" % [progress, GameData.SPECIALIZATION_WAVES]
+	else:
+		specialization_button.text = "SPECIALIZE · %d" % GameData.SPECIALIZATION_COST
+	specialization_button.tooltip_text = "Choose one specialization for this tower"
+	specialization_button.disabled = progress < GameData.SPECIALIZATION_WAVES or not board.build_allowed or board.charge < GameData.SPECIALIZATION_COST or _run_over
+
+func _show_specializations() -> void:
+	var node_id := board.selected_node_id
+	if _run_over or is_instance_valid(_specialization_overlay) or not board.graph.can_specialize(node_id) or not board.build_allowed or board.charge < GameData.SPECIALIZATION_COST:
+		return
+	var type: StringName = board.graph.nodes[node_id]["type"]
+	var overlay := ColorRect.new()
+	overlay.color = Color(0.01, 0.025, 0.06, 0.92)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(overlay)
+	_specialization_overlay = overlay
+	var panel := PanelContainer.new()
+	panel.position = Vector2(285, 175)
+	panel.size = Vector2(710, 370)
+	overlay.add_child(panel)
+	var column := VBoxContainer.new()
+	panel.add_child(column)
+	var title := Label.new()
+	title.text = "%s · NODE %d" % [GameData.tower_definitions()[type]["name"], node_id]
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 24)
+	column.add_child(title)
+	var subtitle := Label.new()
+	subtitle.text = "Choose one specialization · %d charge" % GameData.SPECIALIZATION_COST
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(subtitle)
+	var row := HBoxContainer.new()
+	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(row)
+	var definitions: Array = GameData.specialization_definitions()[type]
+	for index in range(2):
+		var definition: Dictionary = definitions[index]
+		var button := Button.new()
+		button.text = "%s · %s\n\n%s" % ["A" if index == 0 else "B", definition["name"], definition["description"]]
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.custom_minimum_size = Vector2(335, 200)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.pressed.connect(_choose_specialization.bind(node_id, &"a" if index == 0 else &"b", overlay))
+		row.add_child(button)
+	var cancel := Button.new()
+	cancel.text = "CANCEL"
+	cancel.pressed.connect(overlay.queue_free)
+	column.add_child(cancel)
+
+func _choose_specialization(node_id: int, choice: StringName, overlay: Control) -> void:
+	if not _run_over and board.buy_specialization(node_id, choice):
+		overlay.queue_free()
+	else:
+		_set_status("Specialization unavailable")
+		overlay.queue_free()
 
 func _rewire_selected() -> void:
 	board.begin_rewire(board.selected_node_id)
@@ -355,6 +447,7 @@ func _sell_selected() -> void:
 	node_label.text = "SELECT A NODE"
 	rewire_button.disabled = true
 	sell_button.disabled = true
+	_refresh_specialization_ui()
 
 func _toggle_tactical_pause() -> void:
 	if difficulty != "easy" or not board.wave_active:
@@ -421,6 +514,10 @@ func _finish_run(victory: bool, wave_reached: int = -1) -> void:
 	if is_instance_valid(sound_manager):
 		sound_manager.play_music(&"ambient")
 	_run_over = true
+	if is_instance_valid(_specialization_overlay):
+		_specialization_overlay.queue_free()
+		_specialization_overlay = null
+	_refresh_specialization_ui()
 	board.set_process(false)
 	var reached := GameData.MAX_WAVES if victory else (wave_reached if wave_reached >= 0 else next_wave_index)
 	run_ended.emit(reached, victory, difficulty, seed_value)
@@ -432,6 +529,7 @@ func _update_build_policy() -> void:
 		tower_buttons[type].disabled = not allowed
 	rewire_button.disabled = not allowed or board.selected_node_id <= 0
 	sell_button.disabled = not allowed or board.selected_node_id <= 0
+	_refresh_specialization_ui()
 
 static func is_build_allowed(difficulty_id: String, wave_active: bool) -> bool:
 	return not wave_active or difficulty_id in ["easy", "hardcore"]
@@ -585,6 +683,7 @@ func _show_tutorial() -> void:
 
 func _on_charge_changed(value: int) -> void:
 	charge_label.text = "CHARGE %d" % value
+	_refresh_specialization_ui()
 
 func _on_integrity_changed(value: int) -> void:
 	integrity_label.text = "CORE %d" % value

@@ -63,12 +63,49 @@ func place_node(tower_type: StringName, cell: Vector2i, parent_id: int) -> int:
 		return -1
 	var id := next_id
 	next_id += 1
-	nodes[id] = {"id": id, "type": tower_type, "cell": cell, "parent": parent_id, "children": []}
+	nodes[id] = {
+		"id": id, "type": tower_type, "cell": cell, "parent": parent_id, "children": [],
+		"participated_waves": 0, "last_arrival_wave": 0, "specialization": &""
+	}
 	var parent: Dictionary = nodes[parent_id]
 	parent["children"].append(id)
 	nodes[parent_id] = parent
 	changed.emit()
 	return id
+
+func record_arrival(node_id: int, wave: int) -> void:
+	if wave <= 0 or not nodes.has(node_id) or nodes[node_id]["type"] == &"relay":
+		return
+	var node: Dictionary = nodes[node_id]
+	node["last_arrival_wave"] = wave
+	nodes[node_id] = node
+
+func complete_wave(wave: int) -> void:
+	for node_id in nodes:
+		if node_id == 0:
+			continue
+		var node: Dictionary = nodes[node_id]
+		if node["type"] == &"relay" or int(node["last_arrival_wave"]) != wave:
+			continue
+		node["participated_waves"] = int(node["participated_waves"]) + 1
+		node["last_arrival_wave"] = 0
+		nodes[node_id] = node
+	changed.emit()
+
+func can_specialize(node_id: int) -> bool:
+	if node_id <= 0 or not nodes.has(node_id):
+		return false
+	var node: Dictionary = nodes[node_id]
+	return node["type"] != &"relay" and int(node["participated_waves"]) >= GameData.SPECIALIZATION_WAVES and node["specialization"] == &""
+
+func set_specialization(node_id: int, choice: StringName) -> bool:
+	if not can_specialize(node_id) or choice not in [&"a", &"b"]:
+		return false
+	var node: Dictionary = nodes[node_id]
+	node["specialization"] = choice
+	nodes[node_id] = node
+	changed.emit()
+	return true
 
 func can_reparent(node_id: int, new_parent_id: int) -> bool:
 	if node_id <= 0 or new_parent_id < 0 or node_id == new_parent_id:

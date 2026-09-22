@@ -7,6 +7,8 @@ const CORE_CELL := Vector2i(15, 3)
 const STARTING_CHARGE := 220
 const STARTING_INTEGRITY := 20
 const MAX_WAVES := 10
+const SPECIALIZATION_WAVES := 3
+const SPECIALIZATION_COST := 40
 
 const TOWER_ORDER := [&"relay", &"arc", &"cryo", &"lance", &"mortar", &"rift"]
 const BASE_CARD_IDS := [
@@ -65,6 +67,30 @@ static func tower_definitions() -> Dictionary:
 			"reach": 3.5, "children": 1, "color": Color("77aaff"),
 			"description": "Its link burns; its node leaves a damaging field."
 		}
+	}
+
+static func specialization_definitions() -> Dictionary:
+	return {
+		&"arc": [
+			{"name": "Overcharge", "description": "Incoming link shocks deal 18 damage instead of 12."},
+			{"name": "Forkstorm", "description": "Arrival chains to five targets instead of three."}
+		],
+		&"cryo": [
+			{"name": "Frostbite", "description": "Link slow lasts 2.5 seconds and reduces speed to 40%."},
+			{"name": "Cold Snap", "description": "Arrival roots its primary target for 1 second."}
+		],
+		&"lance": [
+			{"name": "Longshot", "description": "Beam range gains 2 cells."},
+			{"name": "Keen Mark", "description": "Link marks last 3 seconds; marked targets take double beam damage."}
+		],
+		&"mortar": [
+			{"name": "Cluster", "description": "Blast radius grows to 1.6 cells."},
+			{"name": "Siegebreaker", "description": "Blasts deal 24 damage and ignore Husk armor."}
+		],
+		&"rift": [
+			{"name": "Gravity Well", "description": "Enemies in the field move at 70% speed."},
+			{"name": "Deep Rift", "description": "Fields last 4 seconds and deal 16 damage per second."}
+		]
 	}
 
 static func enemy_definitions() -> Dictionary:

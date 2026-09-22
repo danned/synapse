@@ -9,6 +9,7 @@ signal node_selected(node_id: int)
 signal message_requested(text: String)
 signal sfx_requested(event: StringName)
 signal coverage_changed
+signal specialization_state_changed
 
 const CELL_SIZE := 64.0
 const LINK_WIDTH := 0.42
@@ -256,6 +257,20 @@ func sell_node(node_id: int) -> void:
 	sfx_requested.emit(&"recycle")
 	queue_redraw()
 	coverage_changed.emit()
+	specialization_state_changed.emit()
+
+func buy_specialization(node_id: int, choice: StringName) -> bool:
+	if not build_allowed or charge < GameData.SPECIALIZATION_COST or not graph.can_specialize(node_id):
+		return false
+	if not graph.set_specialization(node_id, choice):
+		return false
+	charge -= GameData.SPECIALIZATION_COST
+	charge_changed.emit(charge)
+	specialization_state_changed.emit()
+	message_requested.emit("Specialization integrated: %s" % GameData.specialization_definitions()[graph.nodes[node_id]["type"]][0 if choice == &"a" else 1]["name"])
+	sfx_requested.emit(&"draft")
+	queue_redraw()
+	return true
 
 func _collect_subtree_preview(node_id: int, output: Array[int]) -> void:
 	output.append(node_id)
@@ -430,6 +445,7 @@ func _apply_link_effects(pulse: Dictionary, start: Vector2, finish: Vector2) -> 
 	var point := start.lerp(finish, progress)
 	var width := CELL_SIZE * LINK_WIDTH * float(graph.modifiers["link_width_mult"])
 	var node_type: StringName = graph.nodes[int(pulse["to"])]["type"]
+	var specialization: StringName = graph.nodes[int(pulse["to"])].get("specialization", &"")
 	if node_type == &"relay":
 		return
 	var hit: Dictionary = pulse["hit"]
@@ -441,14 +457,14 @@ func _apply_link_effects(pulse: Dictionary, start: Vector2, finish: Vector2) -> 
 		hit[enemy_id] = true
 		match node_type:
 			&"arc":
-				_damage_enemy(index, 12.0, true)
+				_damage_enemy(index, 18.0 if specialization == &"a" else 12.0, true)
 			&"cryo":
-				enemy["slow_until"] = world_time + 1.5 + float(graph.modifiers["cryo_trail_bonus"])
-				enemy["slow_factor"] = 0.58
+				enemy["slow_until"] = world_time + (2.5 if specialization == &"a" else 1.5) + float(graph.modifiers["cryo_trail_bonus"])
+				enemy["slow_factor"] = 0.4 if specialization == &"a" else 0.58
 				enemies[index] = enemy
 				_damage_enemy(index, 2.0, true)
 			&"lance":
-				enemy["marked_until"] = world_time + 2.0
+				enemy["marked_until"] = world_time + (3.0 if specialization == &"b" else 2.0)
 				enemies[index] = enemy
 				_damage_enemy(index, 4.0, true)
 			&"mortar", &"rift":
@@ -460,6 +476,8 @@ func _on_pulse_arrived(node_id: int) -> void:
 	if not graph.nodes.has(node_id):
 		return
 	var type: StringName = graph.nodes[node_id]["type"]
+	if wave_active:
+		graph.record_arrival(node_id, current_wave)
 	match type:
 		&"arc": _fire_arc(node_id)
 		&"cryo": _fire_cryo(node_id)
@@ -470,7 +488,8 @@ func _on_pulse_arrived(node_id: int) -> void:
 		_spawn_pulse(node_id, child_id)
 
 func _fire_arc(node_id: int) -> void:
-	var targets := _targets_in_range(_node_position(node_id), 2.5 + float(graph.modifiers["tower_range_bonus"]), 3 + int(graph.modifiers["arc_targets_bonus"]))
+	var extra_targets := 2 if graph.nodes[node_id]["specialization"] == &"b" else 0
+	var targets := _targets_in_range(_node_position(node_id), 2.5 + float(graph.modifiers["tower_range_bonus"]), 3 + extra_targets + int(graph.modifiers["arc_targets_bonus"]))
 	var target_ids: Array[int] = []
 	for index in targets:
 		target_ids.append(int(enemies[index]["id"]))
@@ -488,7 +507,7 @@ func _fire_cryo(node_id: int) -> void:
 		return
 	var index: int = targets[0]
 	var enemy: Dictionary = enemies[index]
-	enemy["root_until"] = world_time + 0.45
+	enemy["root_until"] = maxf(float(enemy["root_until"]), world_time + (1.0 if graph.nodes[node_id]["specialization"] == &"b" else 0.45))
 	enemy["slow_until"] = world_time + 1.5
 	enemy["slow_factor"] = 0.58
 	enemies[index] = enemy
@@ -509,17 +528,18 @@ func _fire_lance(node_id: int) -> void:
 	var parent_position := _node_position(int(node["parent"]))
 	var node_position := _node_position(node_id)
 	var direction := (node_position - parent_position).normalized()
-	var beam_range := 6.0 + float(graph.modifiers["lance_range_bonus"])
-	_fire_lance_segment(node_position, node_position + direction * beam_range * CELL_SIZE)
+	var beam_range := 6.0 + float(graph.modifiers["lance_range_bonus"]) + (2.0 if node["specialization"] == &"a" else 0.0)
+	_fire_lance_segment(node_position, node_position + direction * beam_range * CELL_SIZE, node_id)
 	if bool(graph.modifiers["bidirectional_lance"]):
-		_fire_lance_segment(node_position, node_position - direction * beam_range * CELL_SIZE)
+		_fire_lance_segment(node_position, node_position - direction * beam_range * CELL_SIZE, node_id)
 	sfx_requested.emit(&"lance")
 
-func _fire_lance_segment(start: Vector2, finish: Vector2) -> void:
+func _fire_lance_segment(start: Vector2, finish: Vector2, node_id: int = -1) -> void:
 	for index in range(enemies.size() - 1, -1, -1):
 		if _distance_to_segment(enemies[index]["position"], start, finish) <= CELL_SIZE * (0.28 + float(graph.modifiers["lance_width_bonus"])):
 			var amount := 24.0
-			if world_time < float(enemies[index]["marked_until"]): amount *= 1.5
+			if world_time < float(enemies[index]["marked_until"]):
+				amount *= 2.0 if node_id >= 0 and graph.nodes[node_id]["specialization"] == &"b" else 1.5
 			_damage_enemy(index, amount, false)
 	effects.append({"type": "line", "from": start, "to": finish, "ttl": 0.24, "color": Color("ff5ba7")})
 
@@ -527,16 +547,23 @@ func _fire_mortar(node_id: int) -> void:
 	var targets := _targets_in_range(_node_position(node_id), 4.0 + float(graph.modifiers["tower_range_bonus"]), 1)
 	if targets.is_empty(): return
 	var center: Vector2 = enemies[targets[0]]["position"]
+	var specialization: StringName = graph.nodes[node_id]["specialization"]
 	for index in range(enemies.size() - 1, -1, -1):
-		if Vector2(enemies[index]["position"]).distance_to(center) <= CELL_SIZE * 1.15:
-			_damage_enemy(index, 20.0, false)
+		if Vector2(enemies[index]["position"]).distance_to(center) <= CELL_SIZE * (1.6 if specialization == &"a" else 1.15):
+			_damage_enemy(index, 24.0 if specialization == &"b" else 20.0, false, specialization == &"b")
 	effects.append({"type": "burst", "position": center, "ttl": 0.45, "color": Color("ffd166")})
 	sfx_requested.emit(&"lance")
 
 func _fire_rift(node_id: int) -> void:
 	var targets := _targets_in_range(_node_position(node_id), 3.5 + float(graph.modifiers["tower_range_bonus"]), 1)
 	if targets.is_empty(): return
-	rift_zones.append({"position": enemies[targets[0]]["position"], "ttl": 2.5})
+	var specialization: StringName = graph.nodes[node_id]["specialization"]
+	var duration := 4.0 if specialization == &"b" else 2.5
+	rift_zones.append({
+		"position": enemies[targets[0]]["position"], "ttl": duration, "duration": duration,
+		"damage": 16.0 if specialization == &"b" else 13.0,
+		"slow": specialization == &"a"
+	})
 	if rift_zones.size() > 12: rift_zones.remove_at(0)
 	sfx_requested.emit(&"cryo")
 
@@ -545,7 +572,13 @@ func _update_rift_zones(delta: float) -> void:
 		var zone: Dictionary = rift_zones[zone_index]
 		for enemy_index in range(enemies.size() - 1, -1, -1):
 			if Vector2(enemies[enemy_index]["position"]).distance_to(zone["position"]) <= CELL_SIZE * 1.25:
-				_damage_enemy(enemy_index, 13.0 * delta, false)
+				if bool(zone["slow"]):
+					var enemy: Dictionary = enemies[enemy_index]
+					var already_slowed := world_time < float(enemy["slow_until"])
+					enemy["slow_until"] = maxf(float(enemy["slow_until"]), world_time + 0.2)
+					enemy["slow_factor"] = minf(float(enemy["slow_factor"]), 0.7) if already_slowed else 0.7
+					enemies[enemy_index] = enemy
+				_damage_enemy(enemy_index, float(zone["damage"]) * delta, false)
 		zone["ttl"] = float(zone["ttl"]) - delta
 		if float(zone["ttl"]) <= 0.0: rift_zones.remove_at(zone_index)
 		else: rift_zones[zone_index] = zone
@@ -562,12 +595,12 @@ func _targets_in_range(origin: Vector2, radius_cells: float, limit: int) -> Arra
 		candidates.resize(limit)
 	return candidates
 
-func _damage_enemy(index: int, raw_amount: float, from_link: bool) -> void:
+func _damage_enemy(index: int, raw_amount: float, from_link: bool, ignore_armor: bool = false) -> void:
 	if index < 0 or index >= enemies.size():
 		return
 	var enemy: Dictionary = enemies[index]
 	var amount := raw_amount
-	if enemy["type"] == &"husk" and not from_link:
+	if enemy["type"] == &"husk" and not from_link and not ignore_armor:
 		amount *= 0.55
 	if enemy["type"] == &"phase" and from_link:
 		amount *= 0.5
@@ -635,6 +668,8 @@ func _check_wave_complete(delta: float) -> void:
 	if _finish_delay <= 0.0:
 		wave_active = false
 		pulses.clear()
+		graph.complete_wave(current_wave)
+		specialization_state_changed.emit()
 		charge += 35 + current_wave * 5 + 3 * _perk_level("wave_metabolism")
 		charge_changed.emit(charge)
 		wave_finished.emit()
@@ -836,7 +871,7 @@ func _draw_paths() -> void:
 
 func _draw_rift_zones() -> void:
 	for zone in rift_zones:
-		var alpha := clampf(float(zone["ttl"]) / 2.5, 0.0, 1.0)
+		var alpha := clampf(float(zone["ttl"]) / float(zone.get("duration", 2.5)), 0.0, 1.0)
 		draw_circle(zone["position"], CELL_SIZE * 1.25, Color(0.23, 0.38, 0.95, 0.12 * alpha))
 		draw_arc(zone["position"], CELL_SIZE * 1.25, 0, TAU, 32, Color(0.48, 0.67, 1.0, 0.45 * alpha), 3)
 
@@ -936,6 +971,11 @@ func _draw_nodes() -> void:
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		else:
 			draw_texture_rect(icon, Rect2(pos - Vector2(14, 14), Vector2(28, 28)), false, color)
+		var specialization: StringName = node.get("specialization", &"")
+		if specialization != &"":
+			var badge_position := pos + Vector2(17, -18)
+			draw_circle(badge_position, 9, Color("33c8ff") if specialization == &"a" else Color("ffd166"))
+			draw_string(ThemeDB.fallback_font, badge_position + Vector2(-5, 5), "A" if specialization == &"a" else "B", HORIZONTAL_ALIGNMENT_CENTER, 10, 14, Color("0b1829"))
 
 func _draw_enemies() -> void:
 	var font := ThemeDB.fallback_font

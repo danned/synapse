@@ -26,6 +26,9 @@ func _run_tests() -> void:
 	_test_new_enemy_behaviors()
 	_test_shielder_behavior()
 	_test_shielder_intel()
+	_test_specialization_progression()
+	_test_specialization_effects()
+	_test_specialization_ui()
 	_test_controller_setup()
 	_test_build_policy()
 	_test_menu_exit_confirmation()
@@ -454,6 +457,145 @@ func _test_shielder_intel() -> void:
 		else:
 			_expect("Shielder" in rows, "%s intel must name the Shielder" % difficulty_id)
 		controller.free()
+func _test_specialization_progression() -> void:
+	var board := GameBoard.new()
+	board.configure(42, "normal")
+	var arc := board.graph.place_node(&"arc", Vector2i(13, 1), 0)
+	var relay := board.graph.place_node(&"relay", Vector2i(13, 5), 0)
+	_expect(not board.buy_specialization(arc, &"a"), "New towers cannot specialize")
+	for wave in range(1, 4):
+		board.current_wave = wave
+		board.wave_active = true
+		board._on_pulse_arrived(arc)
+		board._on_pulse_arrived(arc)
+		board._on_pulse_arrived(relay)
+		board._finish_delay = 0.1
+		board._check_wave_complete(0.2)
+		_expect(int(board.graph.nodes[arc]["participated_waves"]) == wave, "A tower gets one credit per completed wave")
+	_expect(int(board.graph.nodes[relay]["participated_waves"]) == 0, "Relays never gain specialization progress")
+	_expect(not board.graph.can_specialize(relay) and not board.graph.can_specialize(0), "Relay and Core cannot specialize")
+	board.charge = 39
+	_expect(not board.buy_specialization(arc, &"a"), "Specialization requires enough charge")
+	board.charge = 100
+	board.set_build_allowed(false)
+	_expect(not board.buy_specialization(arc, &"a"), "Specialization respects build windows")
+	board.set_build_allowed(true)
+	_expect(not board.buy_specialization(arc, &"invalid"), "Unknown specialization is rejected")
+	_expect(board.buy_specialization(arc, &"a") and board.charge == 60, "Specialization spends 40 charge")
+	_expect(not board.buy_specialization(arc, &"b") and board.graph.nodes[arc]["specialization"] == &"a", "Specialization choices are mutually exclusive")
+	board.sell_node(arc)
+	_expect(board.charge == 120, "Recycling returns only the Arc base cost")
+	_expect(not board.graph.nodes.has(arc), "Recycling removes specialization state")
+	board.free()
+	var dormant := NetworkGraph.new()
+	var id := dormant.place_node(&"arc", Vector2i(13, 1), 0)
+	dormant.complete_wave(1)
+	_expect(int(dormant.nodes[id]["participated_waves"]) == 0, "No arrival gives no participation credit")
+	dormant.record_arrival(id, 2)
+	dormant.complete_wave(2)
+	_expect(int(dormant.nodes[id]["participated_waves"]) == 1, "Later arrivals still count")
+	var relay_id := dormant.place_node(&"relay", Vector2i(12, 4), 0)
+	_expect(dormant.reparent(id, relay_id), "Fixture can rewire the tower")
+	_expect(int(dormant.nodes[id]["participated_waves"]) == 1, "Rewiring preserves participation")
+
+func _test_specialization_effects() -> void:
+	var board := GameBoard.new()
+	board.configure(42, "normal")
+	var arc := board.graph.place_node(&"arc", Vector2i(13, 1), 0)
+	var cryo := board.graph.place_node(&"cryo", Vector2i(13, 5), 0)
+	var lance := board.graph.place_node(&"lance", Vector2i(10, 1), arc)
+	var mortar := board.graph.place_node(&"mortar", Vector2i(10, 5), cryo)
+	var rift := board.graph.place_node(&"rift", Vector2i(8, 5), mortar)
+	_expect(arc > 0 and cryo > 0 and lance > 0 and mortar > 0 and rift > 0, "Specialization fixtures place all tower types")
+	board.graph.nodes[arc]["specialization"] = &"a"
+	board._spawn_enemy(&"husk", 0)
+	board.enemies[0]["position"] = board._node_position(0).lerp(board._node_position(arc), 0.5)
+	board._apply_link_effects({"to": arc, "progress": 0.5, "hit": {}}, board._node_position(0), board._node_position(arc))
+	_expect(is_equal_approx(float(board.enemies[0]["hp"]), 77.0), "Overcharge increases Arc link shock")
+	board.enemies.clear()
+	board.graph.nodes[arc]["specialization"] = &"b"
+	for i in range(5):
+		board._spawn_enemy(&"husk", 0)
+		board.enemies[i]["position"] = board._node_position(arc) + Vector2(i * 4, 0)
+	board._fire_arc(arc)
+	_expect(board.enemies.all(func(enemy: Dictionary) -> bool: return float(enemy["hp"]) < 95.0), "Forkstorm reaches five targets")
+	board.enemies.clear()
+	board.graph.nodes[cryo]["specialization"] = &"a"
+	board._spawn_enemy(&"husk", 0)
+	board.enemies[0]["position"] = board._node_position(0).lerp(board._node_position(cryo), 0.5)
+	board._apply_link_effects({"to": cryo, "progress": 0.5, "hit": {}}, board._node_position(0), board._node_position(cryo))
+	_expect(is_equal_approx(float(board.enemies[0]["slow_factor"]), 0.4) and is_equal_approx(float(board.enemies[0]["slow_until"]), 2.5), "Frostbite strengthens Cryo link slow")
+	board.enemies[0]["position"] = board._node_position(cryo)
+	board.graph.nodes[cryo]["specialization"] = &"b"
+	board._fire_cryo(cryo)
+	_expect(is_equal_approx(float(board.enemies[0]["root_until"]), 1.0), "Cold Snap extends primary root")
+	board.enemies.clear()
+	board.graph.nodes[lance]["specialization"] = &"a"
+	board._spawn_enemy(&"husk", 0)
+	var direction := (board._node_position(lance) - board._node_position(arc)).normalized()
+	board.enemies[0]["position"] = board._node_position(lance) + direction * 7.0 * GameBoard.CELL_SIZE
+	board._fire_lance(lance)
+	_expect(float(board.enemies[0]["hp"]) < 95.0, "Longshot reaches a target seven cells away")
+	board.enemies.clear()
+	board.graph.nodes[lance]["specialization"] = &"b"
+	board._spawn_enemy(&"husk", 0)
+	board.enemies[0]["position"] = board._node_position(arc).lerp(board._node_position(lance), 0.5)
+	board._apply_link_effects({"to": lance, "progress": 0.5, "hit": {}}, board._node_position(arc), board._node_position(lance))
+	_expect(is_equal_approx(float(board.enemies[0]["marked_until"]), 3.0), "Keen Mark lasts three seconds")
+	board.enemies[0]["position"] = board._node_position(lance) + direction * GameBoard.CELL_SIZE
+	board._fire_lance(lance)
+	_expect(is_equal_approx(float(board.enemies[0]["hp"]), 95.0 - 4.0 - 48.0 * 0.55), "Keen Mark doubles marked beam damage")
+	board.enemies.clear()
+	board.graph.nodes[mortar]["specialization"] = &"a"
+	board._spawn_enemy(&"husk", 0)
+	board._spawn_enemy(&"husk", 0)
+	board.enemies[0]["position"] = board._node_position(mortar)
+	board.enemies[1]["position"] = board._node_position(mortar) + Vector2(1.4 * GameBoard.CELL_SIZE, 0)
+	board._fire_mortar(mortar)
+	_expect(float(board.enemies[1]["hp"]) < 95.0, "Cluster hits beyond normal blast radius")
+	board.enemies.clear()
+	board.graph.nodes[mortar]["specialization"] = &"b"
+	board._spawn_enemy(&"husk", 0)
+	board.enemies[0]["position"] = board._node_position(mortar)
+	board._fire_mortar(mortar)
+	_expect(is_equal_approx(float(board.enemies[0]["hp"]), 71.0), "Siegebreaker ignores Husk armor")
+	board.enemies.clear()
+	board.graph.nodes[rift]["specialization"] = &"a"
+	board._spawn_enemy(&"husk", 0)
+	board.enemies[0]["position"] = board._node_position(rift)
+	board._fire_rift(rift)
+	board._update_rift_zones(0.1)
+	_expect(is_equal_approx(float(board.enemies[0]["slow_factor"]), 0.7), "Gravity Well slows enemies in its field")
+	board.rift_zones.clear()
+	board.graph.nodes[rift]["specialization"] = &"b"
+	board._fire_rift(rift)
+	_expect(is_equal_approx(float(board.rift_zones[0]["ttl"]), 4.0), "Deep Rift lasts four seconds")
+	var hp_before := float(board.enemies[0]["hp"])
+	board._update_rift_zones(1.0)
+	_expect(is_equal_approx(hp_before - float(board.enemies[0]["hp"]), 16.0 * 0.55), "Deep Rift deals sixteen damage per second before armor")
+	board.free()
+
+func _test_specialization_ui() -> void:
+	var controller := GameController.new()
+	controller.setup("normal", 42, GameData.BASE_CARD_IDS, false)
+	var arc := controller.board.graph.place_node(&"arc", Vector2i(13, 1), 0)
+	controller.board.selected_node_id = arc
+	controller._on_node_selected(arc)
+	_expect(controller.specialization_button.disabled and "0 / 3" in controller.specialization_button.text, "Selected node shows specialization progress")
+	controller.board.graph.nodes[arc]["participated_waves"] = 3
+	controller._refresh_specialization_ui()
+	_expect(not controller.specialization_button.disabled, "Eligible selected tower enables specialization")
+	controller.board.set_build_allowed(false)
+	controller._refresh_specialization_ui()
+	_expect(controller.specialization_button.disabled, "Build lock disables specialization control")
+	controller.board.set_build_allowed(true)
+	controller._refresh_specialization_ui()
+	controller._show_specializations()
+	var choices: Array = controller._specialization_overlay.find_children("*", "Button", true, false)
+	_expect(choices.size() == 3 and "Overcharge" in choices[0].text and "Forkstorm" in choices[1].text, "Choice panel explains both Arc paths")
+	controller._choose_specialization(arc, &"b", controller._specialization_overlay)
+	_expect(controller.board.graph.nodes[arc]["specialization"] == &"b" and "Forkstorm" in controller.specialization_button.text, "Choice panel updates selected node")
+	controller.free()
 
 func _test_controller_setup() -> void:
 	var controller := GameController.new()
