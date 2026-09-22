@@ -4,7 +4,7 @@
 
 ## Current friction
 
-Placing a tower takes two taps, but a mistaken placement or rewire still means selling part of the network and losing charge. Selling a node also removes its entire downstream branch at once.
+Placing a tower takes two taps, but recycling a mistaken placement returns only part of its cost. A mistaken rewire must be corrected manually, and recycling a node removes its entire downstream branch at once.
 
 ## Idea
 

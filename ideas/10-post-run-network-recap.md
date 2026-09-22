@@ -4,7 +4,7 @@
 
 ## Current friction
 
-The results screen reports wave reached, mode, seed, and Gene Shards. It does not explain which parts of the network worked or where leaks happened.
+The results screen reports the level, wave reached, mode, seed, active mutators, and Gene Shards. It does not explain which parts of the network worked or where leaks happened.
 
 ## Idea
 
