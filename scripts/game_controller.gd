@@ -21,6 +21,7 @@ var intel_label: Label
 var status_label: Label
 var start_button: Button
 var pause_button: Button
+var menu_button: Button
 var cycle_button: Button
 var rewire_button: Button
 var sell_button: Button
@@ -29,6 +30,7 @@ var tower_buttons: Dictionary = {}
 var countdown := -1.0
 var _last_countdown_second := -1
 var _run_over := false
+var _exit_confirmation: Control
 var sound_manager: SoundManager
 
 func setup(p_difficulty: String, p_seed: int, p_deck: Array, show_tutorial: bool) -> void:
@@ -66,10 +68,10 @@ func _build_ui() -> void:
 	var seed_label := _hud_label("SEED %d" % seed_value, Color("7b9bb6"), 170)
 	seed_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	top_row.add_child(seed_label)
-	var menu_button := Button.new()
+	menu_button = Button.new()
 	menu_button.text = "MENU"
 	menu_button.custom_minimum_size = Vector2(90, 44)
-	menu_button.pressed.connect(func(): exit_requested.emit())
+	menu_button.pressed.connect(_request_menu_exit)
 	top_row.add_child(menu_button)
 
 	var intel_panel := PanelContainer.new()
@@ -187,6 +189,8 @@ func _hud_label(text_value: String, color: Color, width: float) -> Label:
 	return label
 
 func _process(delta: float) -> void:
+	if is_instance_valid(_exit_confirmation) and difficulty == "easy":
+		return
 	if countdown < 0.0 or _run_over:
 		return
 	countdown -= delta
@@ -198,6 +202,64 @@ func _process(delta: float) -> void:
 	if countdown <= 0.0:
 		countdown = -1.0
 		_launch_next_wave()
+
+func _request_menu_exit() -> void:
+	if _run_over or is_instance_valid(_exit_confirmation):
+		return
+	if difficulty == "easy":
+		board.set_process(false)
+	var overlay := ColorRect.new()
+	overlay.color = Color(0.01, 0.025, 0.06, 0.7)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(overlay)
+	_exit_confirmation = overlay
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(center)
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(560, 230)
+	center.add_child(panel)
+	var column := VBoxContainer.new()
+	panel.add_child(column)
+	var title := Label.new()
+	title.text = "RETURN TO MAIN MENU?"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_color_override("font_color", Color("62f4d2"))
+	column.add_child(title)
+	var message := Label.new()
+	message.text = "Your current run will be lost."
+	message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(message)
+	var actions := HBoxContainer.new()
+	actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	column.add_child(actions)
+	var keep_playing := Button.new()
+	keep_playing.text = "KEEP PLAYING"
+	keep_playing.custom_minimum_size = Vector2(220, 56)
+	keep_playing.pressed.connect(_cancel_menu_exit)
+	actions.add_child(keep_playing)
+	var return_to_menu := Button.new()
+	return_to_menu.text = "RETURN TO MAIN MENU"
+	return_to_menu.custom_minimum_size = Vector2(260, 56)
+	return_to_menu.pressed.connect(_confirm_menu_exit)
+	actions.add_child(return_to_menu)
+	keep_playing.grab_focus()
+
+func _cancel_menu_exit() -> void:
+	if not is_instance_valid(_exit_confirmation):
+		return
+	_exit_confirmation.queue_free()
+	_exit_confirmation = null
+	if difficulty == "easy":
+		board.set_process(true)
+	menu_button.grab_focus()
+
+func _confirm_menu_exit() -> void:
+	if not is_instance_valid(_exit_confirmation):
+		return
+	exit_requested.emit()
 
 func _select_tower(type: StringName) -> void:
 	if not board.build_allowed:

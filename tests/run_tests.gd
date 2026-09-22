@@ -4,6 +4,9 @@ var failures: Array[String] = []
 var assertions := 0
 
 func _init() -> void:
+	call_deferred("_run_tests")
+
+func _run_tests() -> void:
 	print("SYNAPSE test suite")
 	_test_content_catalog()
 	_test_graph_validation()
@@ -12,6 +15,7 @@ func _init() -> void:
 	_test_wave_determinism()
 	_test_wave_fuzzing()
 	_test_build_policy()
+	_test_menu_exit_confirmation()
 	_test_progression_defaults()
 	if failures.is_empty():
 		print("PASS: %d assertions" % assertions)
@@ -113,3 +117,29 @@ func _test_build_policy() -> void:
 	_expect(not GameController.is_build_allowed("normal", true), "Normal mode must lock building during combat")
 	_expect(GameController.is_build_allowed("hardcore", true), "Hardcore mode must allow building during combat")
 	_expect(GameController.is_build_allowed("normal", false), "Every mode must allow building between waves")
+
+func _test_menu_exit_confirmation() -> void:
+	for difficulty_id in ["easy", "normal", "hardcore"]:
+		var game := GameController.new()
+		root.add_child(game)
+		game.setup(difficulty_id, 424242, GameData.BASE_CARD_IDS, false)
+		var exit_count := [0]
+		game.exit_requested.connect(func(): exit_count[0] += 1)
+		game.countdown = 10.0
+		if difficulty_id == "easy":
+			game.board.set_combat_paused(true)
+		game.menu_button.emit_signal("pressed")
+		_expect(is_instance_valid(game._exit_confirmation), "%s MENU must show a confirmation" % difficulty_id)
+		_expect(exit_count[0] == 0, "%s MENU must not exit immediately" % difficulty_id)
+		_expect(game.board.is_processing() == (difficulty_id != "easy"), "%s confirmation must use its difficulty's timing rule" % difficulty_id)
+		game._process(1.0)
+		_expect(is_equal_approx(game.countdown, 10.0 if difficulty_id == "easy" else 9.0), "%s countdown must use its difficulty's timing rule" % difficulty_id)
+		game._cancel_menu_exit()
+		_expect(exit_count[0] == 0 and not is_instance_valid(game._exit_confirmation), "%s cancel must keep the run" % difficulty_id)
+		_expect(game.board.is_processing(), "%s cancel must restore board processing" % difficulty_id)
+		if difficulty_id == "easy":
+			_expect(game.board.combat_paused, "Easy cancel must preserve tactical pause")
+		game.menu_button.emit_signal("pressed")
+		game._confirm_menu_exit()
+		_expect(exit_count[0] == 1, "%s confirm must request one exit" % difficulty_id)
+		game.queue_free()
