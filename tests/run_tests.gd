@@ -10,6 +10,7 @@ func _run_tests() -> void:
 	print("SYNAPSE test suite")
 	_test_content_catalog()
 	_test_art_catalog()
+	_test_crawler_animation()
 	_test_graph_validation()
 	_test_coverage_preview()
 	_test_round_robin_routing()
@@ -70,6 +71,35 @@ func _test_art_catalog() -> void:
 	for type in enemies:
 		var texture := GameArt.enemy_icon(type)
 		_expect(texture != null and texture.get_size().x > 0, "Enemy %s must load its icon" % type)
+	_expect(GameArt.CRAWLER_WALK_ATLAS.get_size() == Vector2(1254, 1254), "Crawler walk atlas must load at its source dimensions")
+	for direction in [Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT, Vector2.UP]:
+		for frame in range(GameArt.CRAWLER_WALK_FRAME_COUNT):
+			var region := GameArt.crawler_walk_region(direction, frame)
+			_expect(Rect2(Vector2.ZERO, GameArt.CRAWLER_WALK_ATLAS.get_size()).encloses(region), "Crawler frame must stay within the atlas")
+	_expect(GameArt.crawler_walk_region(Vector2.DOWN, 0).position.y == 70.0, "Crawler down frames must use the front-facing row")
+	_expect(GameArt.crawler_walk_region(Vector2.LEFT, 0).position.y == 358.0, "Crawler left frames must use the left-facing row")
+	_expect(GameArt.crawler_walk_region(Vector2.RIGHT, 0).position.y == 632.0, "Crawler right frames must use the right-facing row")
+	_expect(GameArt.crawler_walk_region(Vector2.UP, 0).position.y == 922.0, "Crawler up frames must use the rear-facing row")
+	_expect(GameArt.crawler_walk_frame(0.25) == 2, "Crawler walk frames must advance with distance traveled")
+
+func _test_crawler_animation() -> void:
+	var board := GameBoard.new()
+	board.configure(42, "normal")
+	board._spawn_enemy(&"crawler", 0)
+	var enemy: Dictionary = board.enemies[0]
+	_expect(board._enemy_direction(enemy) == Vector2.RIGHT, "Crawler must face along its current path segment")
+	board._advance_enemy(enemy, 0.25)
+	_expect(is_equal_approx(float(enemy["walk_distance"]), 0.25), "Crawler animation distance must follow movement")
+	_expect(GameArt.crawler_walk_frame(float(enemy["walk_distance"])) == 2, "Crawler movement must select the matching walk frame")
+	enemy["segment"] = 4
+	enemy["segment_t"] = 0.0
+	_expect(board._enemy_direction(enemy) == Vector2.DOWN, "Crawler must turn when its path turns")
+	var distance_before_root := float(enemy["walk_distance"])
+	enemy["root_until"] = 1.0
+	board.enemies[0] = enemy
+	board._update_enemies(0.5)
+	_expect(is_equal_approx(float(board.enemies[0]["walk_distance"]), distance_before_root), "Rooted crawlers must freeze their walk animation")
+	board.free()
 
 func _test_graph_validation() -> void:
 	var graph := NetworkGraph.new()

@@ -353,6 +353,7 @@ func _spawn_enemy(type: StringName, lane: int, segment: int = 0, segment_t: floa
 		"id": next_enemy_id, "type": type, "lane": lane,
 		"segment": segment, "segment_t": segment_t, "position": _cell_center(_path_for_lane(lane)[0]),
 		"hp": health, "max_hp": health, "reward_override": reward_override,
+		"walk_distance": 0.0,
 		"slow_until": 0.0, "slow_factor": 1.0, "root_until": 0.0,
 		"marked_until": 0.0, "disable_cooldown": 0.0,
 		"shield_until": 0.0, "next_shield_pulse": world_time + 0.75
@@ -423,6 +424,7 @@ func _update_shielders() -> void:
 
 func _advance_enemy(enemy: Dictionary, distance_cells: float) -> void:
 	var path := _path_for_lane(int(enemy["lane"]))
+	var starting_progress := _enemy_progress(enemy)
 	var remaining := distance_cells
 	while remaining > 0.0 and int(enemy["segment"]) < path.size() - 1:
 		var available := 1.0 - float(enemy["segment_t"])
@@ -433,6 +435,7 @@ func _advance_enemy(enemy: Dictionary, distance_cells: float) -> void:
 			remaining -= available
 			enemy["segment"] = int(enemy["segment"]) + 1
 			enemy["segment_t"] = 0.0
+	enemy["walk_distance"] = float(enemy.get("walk_distance", 0.0)) + _enemy_progress(enemy) - starting_progress
 
 func _enemy_position(enemy: Dictionary) -> Vector2:
 	var path := _path_for_lane(int(enemy["lane"]))
@@ -440,6 +443,13 @@ func _enemy_position(enemy: Dictionary) -> Vector2:
 	if segment >= path.size() - 1:
 		return _cell_center(path[-1])
 	return _cell_center(path[segment]).lerp(_cell_center(path[segment + 1]), float(enemy["segment_t"]))
+
+func _enemy_direction(enemy: Dictionary) -> Vector2:
+	var path := _path_for_lane(int(enemy["lane"]))
+	if path.size() < 2:
+		return Vector2.RIGHT
+	var segment := mini(int(enemy["segment"]), path.size() - 2)
+	return Vector2(path[segment + 1] - path[segment]).normalized()
 
 func _emit_core_pulses() -> void:
 	for child_id in graph.outgoing_for_pulse(0):
@@ -1046,14 +1056,19 @@ func _draw_enemies() -> void:
 	for enemy in enemies:
 		var pos: Vector2 = enemy["position"]
 		var definition: Dictionary = GameData.enemy_definitions()[enemy["type"]]
-		var radius := 22.0 if enemy["type"] == &"severer" else (14.0 if enemy["type"] == &"husk" else 10.0)
+		var radius := 22.0 if enemy["type"] == &"severer" else (17.0 if enemy["type"] == &"crawler" else (14.0 if enemy["type"] == &"husk" else 10.0))
 		draw_circle(pos, radius + 4, Color(0, 0, 0, 0.45))
-		var icon_size := 48.0 if enemy["type"] == &"severer" else (32.0 if enemy["type"] == &"husk" else 26.0)
-		var icon := GameArt.enemy_icon(enemy["type"])
-		var icon_color: Color = definition["color"]
-		if enemy["type"] == &"phase":
-			icon_color.a = 0.76
-		draw_texture_rect(icon, Rect2(pos - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false, icon_color)
+		if enemy["type"] == &"crawler":
+			var frame := GameArt.crawler_walk_frame(float(enemy.get("walk_distance", 0.0)))
+			var source := GameArt.crawler_walk_region(_enemy_direction(enemy), frame)
+			draw_texture_rect_region(GameArt.CRAWLER_WALK_ATLAS, Rect2(pos - Vector2(22, 22), Vector2(44, 44)), source)
+		else:
+			var icon_size := 48.0 if enemy["type"] == &"severer" else (32.0 if enemy["type"] == &"husk" else 26.0)
+			var icon := GameArt.enemy_icon(enemy["type"])
+			var icon_color: Color = definition["color"]
+			if enemy["type"] == &"phase":
+				icon_color.a = 0.76
+			draw_texture_rect(icon, Rect2(pos - Vector2.ONE * icon_size * 0.5, Vector2.ONE * icon_size), false, icon_color)
 		if enemy["type"] == &"phase": draw_arc(pos, radius + 5, 0, TAU, 18, Color("6fdcff"), 2)
 		if objective_status == &"active" and int(enemy["id"]) == objective_enemy_id:
 			draw_arc(pos, radius + 9, 0, TAU, 24, Color("fff27a"), 3)

@@ -2,6 +2,8 @@
 
 Tower and enemy icons are by **Lorc**, sourced from [Game-icons.net](https://game-icons.net/), and licensed under [Creative Commons Attribution 3.0 Unported (CC BY 3.0)](https://creativecommons.org/licenses/by/3.0/). White, transparent PNG renderings of the original SVGs are distributed in `assets/icons/`; SYNAPSE tints them at runtime. The format conversion is the only change made to the source artwork.
 
+The animated Crawler walk atlas in `assets/sprites/crawler_walk.png` was supplied directly for this project.
+
 | Game type | Original icon |
 | --- | --- |
 | Relay | [Triorb](https://game-icons.net/1x1/lorc/triorb.html) |

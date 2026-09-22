@@ -660,7 +660,7 @@ func _add_intel_type_row(type: StringName, row_text: String) -> void:
 	intel_types.add_child(row)
 	var icon := TextureRect.new()
 	icon.texture = GameArt.enemy_icon(type)
-	icon.modulate = GameData.enemy_definitions()[type]["color"]
+	icon.modulate = Color.WHITE if type == &"crawler" else GameData.enemy_definitions()[type]["color"]
 	icon.custom_minimum_size = Vector2(18, 18)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
